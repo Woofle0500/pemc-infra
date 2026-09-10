@@ -23,11 +23,12 @@ tfplan*
 crash.log
 crash.*.log
 
-# Credentials, in case something writes them locally
+# Files containing sensitive information
 .env
 *.pem
 *.key
 credentials
+docs/naming.md
 
 # IDEs and Editors
 .vscode/
