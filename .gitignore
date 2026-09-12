@@ -36,6 +36,7 @@ docs/naming.md
 .idea/
 *.swp
 *.swo
+.envrc
 
 # OS Files
 .DS_Store
