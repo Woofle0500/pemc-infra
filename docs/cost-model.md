@@ -17,7 +17,8 @@ Among the services/resources provisioned in the multi-cloud infrastructure, only
 
 AWS Budgets and Cost Anomaly Detection act as lagging nets: they notify us when spending exceeds a threshold or deviates from expected patterns, but they do not automatically stop cost growth by default. Monthly budgets track spending within each budget period, so the actual amount resets at the start of a new month rather than accumulating indefinitely. Review Cost Explorer weekly to identify cumulative spending, unexpected cost trends, and charges that may have gone unnoticed by the alerts.
 
-In AWS, SCPs (Service Control Policies) are the main guardrail for the cost control. For example, denying NATGateway creation in the sandbox accounts, limit EC2 instance types to a select few so that only allowed instance types are provisioned, restricting regions etc - all this so that nothing expensive gets created. Budgets and cost anomaly is detection, SCPs are the prevention mechanisms located at the API request level.
+In AWS, SCPs (Service Control Policies) are the main guardrail for the cost control. For example, denying NATGateway creation in the sandbox accounts, limit EC2 instance types to a select few so that only allowed instance types are provisioned, restricting regions etc - all this so that nothing expensive gets created. Budgets and cost anomaly is detection, SCPs are the prevention mechanisms located at the API request level. Something similar is setup in GCP using Organisation Policies. #TODO : add the reason that the policies are mostly for learning purpose instead of being useful in cost control. idk.
+
 
 In case where Terratest leaves orphaned resources, they are cleaned up by the Terratest sweeper.
 
