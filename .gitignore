@@ -14,6 +14,9 @@
 *.tfvars.json
 !example.tfvars
 
+# Backend config files - local -backend-config overrides (e.g. AWS profile)
+*-backend-config.hcl
+
 # Plan files — full topology in binary form
 *.tfplan
 plan.out

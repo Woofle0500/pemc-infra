@@ -83,9 +83,9 @@ data "aws_iam_policy_document" "state_bucket_policy" {
       values   = ["aws:kms"]
     }
     condition {
-      test = "Null"
+      test     = "Null"
       variable = "s3:x-amz-server-side-encryption"
-      values = ["false"]
+      values   = ["false"]
     }
   }
 
@@ -105,9 +105,9 @@ data "aws_iam_policy_document" "state_bucket_policy" {
       values   = [aws_kms_key.state_bucket_kms.arn]
     }
     condition {
-      test = "Null"
+      test     = "Null"
       variable = "s3:x-amz-server-side-encryption-aws-kms-key-id"
-      values = ["false"]
+      values   = ["false"]
     }
   }
 
@@ -164,4 +164,130 @@ data "aws_iam_policy_document" "state_bucket_policy" {
 resource "aws_s3_bucket_policy" "state_bucket_policy" {
   bucket = aws_s3_bucket.state_bucket.id
   policy = data.aws_iam_policy_document.state_bucket_policy.json
+}
+
+resource "aws_iam_openid_connect_provider" "github_actions" {
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
+}
+
+// Plan role: read-only access to state, used by CI runs against pull requests.
+data "aws_iam_policy_document" "tfstate_plan" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github_actions.arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:Woofle0500@65225019/pemc-infra@1363157651:pull_request"]
+    }
+  }
+}
+
+resource "aws_iam_role" "tfstate_plan" {
+  name               = "pemc-tfstate-plan"
+  assume_role_policy = data.aws_iam_policy_document.tfstate_plan.json
+}
+
+data "aws_iam_policy_document" "tfstate_plan_permissions" {
+  statement {
+    sid       = "ListStateBucket"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.state_bucket.arn]
+  }
+  statement {
+    sid       = "GetTfstateObjects"
+    effect    = "Allow"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.state_bucket.arn}/live/*/terraform.tfstate"]
+  }
+  statement {
+    sid       = "ManageLockFiles"
+    effect    = "Allow"
+    actions   = ["s3:PutObject", "s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.state_bucket.arn}/live/*/terraform.tfstate.tflock"]
+  }
+  statement {
+    sid       = "DecryptState"
+    effect    = "Allow"
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey"]
+    resources = [aws_kms_key.state_bucket_kms.arn]
+  }
+
+  // The bootstrap stacks (this one and sandbox/_bootstrap) are applied
+  // locally with SSO credentials and are never planned or applied in CI -
+  // CI has no legitimate reason to touch their state.
+  statement {
+    sid    = "DenyBootstrapStateAccess"
+    effect = "Deny"
+    actions = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = [
+      "${aws_s3_bucket.state_bucket.arn}/live/_bootstrap/*",
+      "${aws_s3_bucket.state_bucket.arn}/live/sandbox/_bootstrap/*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "tfstate_plan_permissions" {
+  name   = "pemc-tfstate-plan-permissions"
+  role   = aws_iam_role.tfstate_plan.id
+  policy = data.aws_iam_policy_document.tfstate_plan_permissions.json
+}
+
+// Apply role: same as plan, plus the ability to write state, used by CI runs
+// applying against the sandbox-apply environment.
+data "aws_iam_policy_document" "tfstate_apply" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github_actions.arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:Woofle0500@65225019/pemc-infra@1363157651:environment:sandbox-apply"]
+    }
+  }
+}
+
+resource "aws_iam_role" "tfstate_apply" {
+  name               = "pemc-tfstate-apply"
+  assume_role_policy = data.aws_iam_policy_document.tfstate_apply.json
+  // Apply can last more than the default 1 hour session duration, hence 
+  // setting session duration to 3 hours just to be safe.
+  max_session_duration = 10800
+}
+
+data "aws_iam_policy_document" "tfstate_apply_permissions" {
+  source_policy_documents = [data.aws_iam_policy_document.tfstate_plan_permissions.json]
+
+  statement {
+    sid       = "PutTfstateObjects"
+    effect    = "Allow"
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.state_bucket.arn}/live/*/terraform.tfstate"]
+  }
+}
+
+resource "aws_iam_role_policy" "tfstate_apply_permissions" {
+  name   = "pemc-tfstate-apply-permissions"
+  role   = aws_iam_role.tfstate_apply.id
+  policy = data.aws_iam_policy_document.tfstate_apply_permissions.json
 }
