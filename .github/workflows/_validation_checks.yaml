@@ -50,6 +50,52 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - uses: terraform-linters/setup-tflint@1cf010d3c7aef302051ccdb68c14c5dc2efa34ef # v6.3.1
+        with:
+          tflint_version_file: .tool-versions
+
+      - name: Compute SARIF category
+        id: slug
+        run: echo "slug=$(echo '${{ inputs.stack }}' | tr './' '--')" >> "$GITHUB_OUTPUT"
+
+      - name: Run TFLint (Blocking)
+        working-directory: ${{ inputs.stack }}
+        run: |
+          tflint --init
+          tflint --format compact
+
+      - name: Run TFLint (generate SARIF report)
+        if: always()
+        working-directory: ${{ inputs.stack }}
+        run: tflint --format sarif > tflint-results.sarif || true
+
+      - name: Fix SARIF artifact paths
+        if: always()
+        working-directory: ${{ inputs.stack }}
+        run: |
+          STACK="${{ inputs.stack }}"
+          STACK="${STACK#./}"   # strip leading ./
+          jq --arg prefix "$STACK/" '
+            .runs[].results[].locations[].physicalLocation.artifactLocation.uri |= ($prefix + .)
+          ' tflint-results.sarif > tflint-results-fixed.sarif
+          mv tflint-results-fixed.sarif tflint-results.sarif
+
+      - name: Upload to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          sarif_file: '${{ inputs.stack }}/tflint-results.sarif'
+          category: 'tflint-${{ steps.slug.outputs.slug }}'
+
+  security-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write   # needed to upload SARIF to the Security tab
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       - name: Compute SARIF category
         id: slug
         run: echo "slug=$(echo '${{ inputs.stack }}' | tr './' '--')" >> "$GITHUB_OUTPUT"
