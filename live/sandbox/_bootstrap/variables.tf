@@ -20,8 +20,8 @@ variable "state_bucket_arn" {
 }
 
 variable "management_account_root_arn" {
-  type        = string
-  default     = "arn:aws:iam::730335219774:root"
+  type    = string
+  default = "arn:aws:iam::730335219774:root"
 }
 
 variable "management_sso_admin_role_arn_pattern" {

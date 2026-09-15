@@ -228,8 +228,8 @@ data "aws_iam_policy_document" "tfstate_plan_permissions" {
   // locally with SSO credentials and are never planned or applied in CI -
   // CI has no legitimate reason to touch their state.
   statement {
-    sid    = "DenyBootstrapStateAccess"
-    effect = "Deny"
+    sid     = "DenyBootstrapStateAccess"
+    effect  = "Deny"
     actions = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
     resources = [
       "${aws_s3_bucket.state_bucket.arn}/live/_bootstrap/*",
