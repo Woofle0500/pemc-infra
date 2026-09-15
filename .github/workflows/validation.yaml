@@ -1,0 +1,21 @@
+name: Validation
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: ["./live/_bootstrap", "./live/sandbox/_bootstrap"]
+    steps:
+      - uses: ./.github/workflows/_validation_checks.yaml
+        with:
+          stack: ${{ matrix.stack }}
