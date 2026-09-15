@@ -3,6 +3,13 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - "live/**"
+      - ".github/workflows/**"
+
+concurrency:
+  group: validation-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -10,12 +17,14 @@ permissions:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    name: Validate (${{ matrix.stack }})
     strategy:
       fail-fast: false
       matrix:
         stack: ["./live/_bootstrap", "./live/sandbox/_bootstrap"]
-    steps:
-      - uses: ./.github/workflows/_validation_checks.yaml
-        with:
-          stack: ${{ matrix.stack }}
+    uses: ./.github/workflows/_validation_checks.yaml
+    with:
+      stack: ${{ matrix.stack }}
+    permissions:
+      contents: read
+      security-events: write
