@@ -34,3 +34,16 @@ jobs:
     permissions:
       contents: read
       security-events: write
+
+  validation-gate:
+    name: Validation
+    runs-on: ubuntu-latest
+    needs: validate
+    if: always()
+    steps:
+      - name: Check matrix result
+        run: |
+          if [ "${{ needs.validate.result }}" != "success" ]; then
+            echo "One or more stacks failed validation"
+            exit 1
+          fi
