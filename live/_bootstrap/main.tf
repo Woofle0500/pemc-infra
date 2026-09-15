@@ -6,7 +6,7 @@ resource "aws_s3_bucket" "state_bucket" {
 }
 
 resource "aws_s3_bucket_versioning" "state_bucket_versioning" {
-  bucket = aws_s3_bucket.state_bucket.id
+  bucket =      aws_s3_bucket.state_bucket.id
   versioning_configuration {
     status = "Enabled"
   }
