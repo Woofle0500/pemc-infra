@@ -47,3 +47,11 @@ jobs:
             echo "One or more stacks failed validation"
             exit 1
           fi
+          
+
+  no-credentials:
+    name: AWS No Credentials
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get caller identity
+        run: aws sts get-caller-identity || true
