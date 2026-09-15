@@ -14,6 +14,9 @@
 *.tfvars.json
 !example.tfvars
 
+# Backend config files - local -backend-config overrides (e.g. AWS profile)
+*-backend-config.hcl
+
 # Plan files — full topology in binary form
 *.tfplan
 plan.out
@@ -23,11 +26,12 @@ tfplan*
 crash.log
 crash.*.log
 
-# Credentials, in case something writes them locally
+# Files containing sensitive information
 .env
 *.pem
 *.key
 credentials
+docs/naming.md
 
 # IDEs and Editors
 .vscode/
@@ -35,6 +39,7 @@ credentials
 .idea/
 *.swp
 *.swo
+.envrc
 
 # OS Files
 .DS_Store

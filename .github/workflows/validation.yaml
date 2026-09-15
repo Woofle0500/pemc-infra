@@ -1,0 +1,49 @@
+name: Validation
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "live/**"
+      - ".github/workflows/**"
+  push:
+    branches:
+      - main
+    paths:
+      - "live/**"
+      - ".github/workflows/**"
+
+concurrency:
+  group: validation-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  validate:
+    name: Validate (${{ matrix.stack }})
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: ["./live/_bootstrap", "./live/sandbox/_bootstrap"]
+    uses: ./.github/workflows/_validation_checks.yaml
+    with:
+      stack: ${{ matrix.stack }}
+    permissions:
+      contents: read
+      security-events: write
+
+  validation-gate:
+    name: Validation
+    runs-on: ubuntu-latest
+    needs: validate
+    if: always()
+    steps:
+      - name: Check matrix result
+        run: |
+          if [ "${{ needs.validate.result }}" != "success" ]; then
+            echo "One or more stacks failed validation"
+            exit 1
+          fi
