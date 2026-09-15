@@ -75,6 +75,16 @@ jobs:
           output: 'trivy-results.sarif'
           scan-ref: ${{ inputs.stack }}
 
+      - name: Fix SARIF artifact paths
+        if: always()
+        run: |
+          STACK="${{ inputs.stack }}"
+          STACK="${STACK#./}"   # strip leading ./
+          jq --arg prefix "$STACK/" '
+            .runs[].results[].locations[].physicalLocation.artifactLocation.uri |= ($prefix + .)
+          ' trivy-results.sarif > trivy-results-fixed.sarif
+          mv trivy-results-fixed.sarif trivy-results.sarif
+
       - name: Upload to GitHub Security tab
         if: always()
         uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0

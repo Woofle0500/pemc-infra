@@ -6,9 +6,15 @@ on:
     paths:
       - "live/**"
       - ".github/workflows/**"
+  push:
+    branches:
+      - main
+    paths:
+      - "live/**"
+      - ".github/workflows/**"
 
 concurrency:
-  group: validation-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: validation-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
