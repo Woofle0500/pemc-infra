@@ -8,11 +8,6 @@ variable "versioning_enabled" {
   default = true
 }
 
-variable "allow_public_access" {
-  type    = bool
-  default = false
-}
-
 variable "kms_key_alias" {
   type    = string
   default = "alias/woofle-pemc-s3"

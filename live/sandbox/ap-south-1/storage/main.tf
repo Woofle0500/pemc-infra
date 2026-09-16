@@ -11,8 +11,7 @@ resource "aws_kms_alias" "storage" {
 module "storage" {
   source = "../../../../modules/aws/s3-bucket"
 
-  bucket_name         = var.bucket_name
-  versioning_enabled  = var.versioning_enabled
-  allow_public_access = var.allow_public_access
-  kms_key_arn         = aws_kms_key.storage.arn
+  bucket_name        = var.bucket_name
+  versioning_enabled = var.versioning_enabled
+  kms_key_arn        = aws_kms_key.storage.arn
 }
