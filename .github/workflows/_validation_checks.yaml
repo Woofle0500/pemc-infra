@@ -22,7 +22,9 @@ jobs:
           terraform_wrapper: false
 
       - name: Check terraform formatting
-        run: terraform fmt -check -recursive -diff ${{ inputs.stack }}
+        env:
+          STACK: ${{ inputs.stack }}
+        run: terraform fmt -check -recursive -diff "$STACK"
 
   validate:
     runs-on: ubuntu-latest
@@ -56,7 +58,9 @@ jobs:
 
       - name: Compute SARIF category
         id: slug
-        run: echo "slug=$(echo '${{ inputs.stack }}' | tr './' '--')" >> "$GITHUB_OUTPUT"
+        env:
+          STACK: ${{ inputs.stack }}
+        run: echo "slug=$(echo "$STACK" | tr './' '--')" >> "$GITHUB_OUTPUT"
 
       - name: Run TFLint (Blocking)
         working-directory: ${{ inputs.stack }}
@@ -72,8 +76,9 @@ jobs:
       - name: Fix SARIF artifact paths
         if: always()
         working-directory: ${{ inputs.stack }}
+        env:
+          STACK: ${{ inputs.stack }}
         run: |
-          STACK="${{ inputs.stack }}"
           STACK="${STACK#./}"   # strip leading ./
           jq --arg prefix "$STACK/" '
             .runs[].results[].locations[].physicalLocation.artifactLocation.uri |= ($prefix + .)
@@ -98,7 +103,9 @@ jobs:
 
       - name: Compute SARIF category
         id: slug
-        run: echo "slug=$(echo '${{ inputs.stack }}' | tr './' '--')" >> "$GITHUB_OUTPUT"
+        env:
+          STACK: ${{ inputs.stack }}
+        run: echo "slug=$(echo "$STACK" | tr './' '--')" >> "$GITHUB_OUTPUT"
 
       - name: Trivy config scan (Blocking)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -124,8 +131,9 @@ jobs:
 
       - name: Fix SARIF artifact paths
         if: always()
+        env:
+          STACK: ${{ inputs.stack }}
         run: |
-          STACK="${{ inputs.stack }}"
           STACK="${STACK#./}"   # strip leading ./
           jq --arg prefix "$STACK/" '
             .runs[].results[].locations[].physicalLocation.artifactLocation.uri |= ($prefix + .)
