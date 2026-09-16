@@ -1,7 +1,0 @@
-misconfigurations:
-  - id: AVD-AWS-0089
-    expired_at: 2026-09-19
-    paths:
-      - "live/_bootstrap/main.tr"
-    statement: "Testing trivyignore mechanics"
-

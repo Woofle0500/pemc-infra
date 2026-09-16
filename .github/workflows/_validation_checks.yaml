@@ -107,8 +107,8 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           format: 'table'
-          trivyignores: '.trivyignore.yaml'
           scan-ref: ${{ inputs.stack }}
+          version: 'v0.74.0' # keep in sync with .tool-versions
 
       - name: Trivy config scan (generate report)
         if: always()
@@ -120,6 +120,7 @@ jobs:
           format: 'sarif'
           output: 'trivy-results.sarif'
           scan-ref: ${{ inputs.stack }}
+          version: 'v0.74.0' # keep in sync with .tool-versions
 
       - name: Fix SARIF artifact paths
         if: always()
