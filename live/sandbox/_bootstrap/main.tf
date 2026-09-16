@@ -231,11 +231,15 @@ data "aws_iam_policy_document" "pemc_apply_boundary" {
     resources = [var.state_bucket_kms_cmk_arn]
   }
 
+  // This is defense-in-depth guardrail. It prevents state bucket key
+  // deletion. Although it would require the Key itself to allow this role
+  // to delete it, but if that were to every happen due to the config
+  // changes, this will be the backstop.
   statement {
     sid       = "DenyKmsKeyDestruction"
     effect    = "Deny"
     actions   = ["kms:ScheduleKeyDeletion", "kms:DisableKey"]
-    resources = ["*"]
+    resources = [var.state_bucket_kms_cmk_arn]
   }
 
   // Apply is assumed via OIDC and has no legitimate reason to pivot into
