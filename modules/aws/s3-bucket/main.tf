@@ -10,7 +10,6 @@ resource "aws_s3_bucket_versioning" "this" {
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
-  count  = var.encryption_enabled ? 1 : 0
   bucket = aws_s3_bucket.this.id
   rule {
     bucket_key_enabled = true
@@ -23,8 +22,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
 
 resource "aws_s3_bucket_public_access_block" "this" {
   bucket                  = aws_s3_bucket.this.id
-  block_public_acls       = !var.allow_public_access
-  ignore_public_acls      = !var.allow_public_access
-  block_public_policy     = !var.allow_public_access
-  restrict_public_buckets = !var.allow_public_access
+  block_public_acls       = true
+  ignore_public_acls      = true
+  block_public_policy     = true
+  restrict_public_buckets = true
 }
