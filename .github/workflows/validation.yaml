@@ -12,22 +12,59 @@ on:
     paths:
       - "live/**"
       - ".github/workflows/**"
+  schedule:
+    - cron: "0 0 * * 0" # every Sunday at 00:00 UTC
 
 concurrency:
   group: validation-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-  security-events: write
+permissions: {}
 
 jobs:
+  discover-stacks:
+    name: Discover stacks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      stacks: ${{ steps.find.outputs.stacks }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Find stack directories
+        id: find
+        run: |
+          stacks=$(find live -type f -name '*.tf' -exec dirname {} \; | sort -u | jq -R -s -c 'split("\n")[:-1]')
+
+          if [ "$stacks" = "[]" ]; then
+            echo "::error::No Terraform stacks found under live/ (no directories contain .tf files)."
+            exit 1
+          fi
+
+          echo "stacks=$stacks" >> "$GITHUB_OUTPUT"
+
+  no-credentials:
+    name: No credentials present
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail if AWS credentials are present on the runner
+        run: |
+          if aws sts get-caller-identity >/dev/null 2>&1; then
+            echo "::error::AWS credentials are configured on this runner; this workflow must run with no cloud credentials present."
+            exit 1
+          fi
+          echo "No AWS credentials configured, as expected."
+
   validate:
     name: Validate (${{ matrix.stack }})
+    needs: [discover-stacks, no-credentials]
     strategy:
       fail-fast: false
       matrix:
-        stack: ["./live/_bootstrap", "./live/sandbox/_bootstrap"]
+        stack: ${{ fromJSON(needs.discover-stacks.outputs.stacks) }}
     uses: ./.github/workflows/_validation_checks.yaml
     with:
       stack: ${{ matrix.stack }}

@@ -61,13 +61,13 @@ jobs:
       - name: Run TFLint (Blocking)
         working-directory: ${{ inputs.stack }}
         run: |
-          tflint --init
-          tflint --format compact
+          tflint --config "$GITHUB_WORKSPACE/.tflint.hcl" --init
+          tflint --config "$GITHUB_WORKSPACE/.tflint.hcl" --format compact
 
       - name: Run TFLint (generate SARIF report)
         if: always()
         working-directory: ${{ inputs.stack }}
-        run: tflint --format sarif > tflint-results.sarif || true
+        run: tflint --config "$GITHUB_WORKSPACE/.tflint.hcl" --format sarif > tflint-results.sarif || true
 
       - name: Fix SARIF artifact paths
         if: always()
@@ -107,8 +107,8 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           format: 'table'
-          trivyignores: '.trivyignore.yaml'
           scan-ref: ${{ inputs.stack }}
+          version: 'v0.74.0' # keep in sync with .tool-versions
 
       - name: Trivy config scan (generate report)
         if: always()
@@ -120,6 +120,7 @@ jobs:
           format: 'sarif'
           output: 'trivy-results.sarif'
           scan-ref: ${{ inputs.stack }}
+          version: 'v0.74.0' # keep in sync with .tool-versions
 
       - name: Fix SARIF artifact paths
         if: always()

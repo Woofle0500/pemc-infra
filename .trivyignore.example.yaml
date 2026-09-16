@@ -1,0 +1,18 @@
+# Example .trivyignore.yaml
+#
+# This repo does not currently suppress any Trivy findings — no active
+# .trivyignore.yaml is wired into the workflow. This file only documents
+# the format for the next time someone needs to ignore a specific finding.
+#
+# To use it: copy this file to `.trivyignore.yaml`, trim it down to only
+# the entries you need, and add the `trivyignores: '.trivyignore.yaml'`
+# input to the Trivy steps in .github/workflows/_validation_checks.yaml.
+#
+# Reference: https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids
+
+misconfigurations:
+  - id: AVD-AWS-0089 # the Trivy/AVD finding ID to suppress (shown in scan output)
+    paths:
+      - "live/_bootstrap/main.tf" # only suppress it for this specific file/path
+    statement: "Explain why this finding is a false positive or accepted risk here." # required — reviewers may read this
+    expired_at: 2026-12-31 # optional but recommended - the finding ID will only be ignored till the specified date instead of being allowed forever.
