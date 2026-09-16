@@ -37,11 +37,30 @@ jobs:
         id: find
         run: |
           stacks=$(find live -type f -name '*.tf' -exec dirname {} \; | sort -u | jq -R -s -c 'split("\n")[:-1]')
+
+          if [ "$stacks" = "[]" ]; then
+            echo "::error::No Terraform stacks found under live/ (no directories contain .tf files)."
+            exit 1
+          fi
+
           echo "stacks=$stacks" >> "$GITHUB_OUTPUT"
+
+  no-credentials:
+    name: No credentials present
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail if AWS credentials are present on the runner
+        run: |
+          if aws sts get-caller-identity >/dev/null 2>&1; then
+            echo "::error::AWS credentials are configured on this runner; this workflow must run with no cloud credentials present."
+            exit 1
+          fi
+          echo "No AWS credentials configured, as expected."
 
   validate:
     name: Validate (${{ matrix.stack }})
-    needs: discover-stacks
+    needs: [discover-stacks, no-credentials]
     strategy:
       fail-fast: false
       matrix:
