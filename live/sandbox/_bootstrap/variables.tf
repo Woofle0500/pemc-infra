@@ -41,3 +41,18 @@ variable "oidc_provider_tag" {
     "pemc:environment" = "platform"
   }
 }
+
+variable "kms_key_alias" {
+  type    = string
+  default = "alias/woofle-pemc-s3"
+}
+
+variable "kms_key_description" {
+  type    = string
+  default = "CMK for sandbox account s3 buckets"
+}
+
+variable "plan_output_bucket_name" {
+  type    = string
+  default = "woofle-pemc-sandbox-plan-output"
+}
