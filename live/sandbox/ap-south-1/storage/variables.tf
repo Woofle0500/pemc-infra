@@ -9,11 +9,7 @@ variable "versioning_enabled" {
 }
 
 variable "kms_key_alias" {
-  type    = string
-  default = "alias/woofle-pemc-s3"
-}
-
-variable "kms_key_description" {
-  type    = string
-  default = "CMK for the sandbox storage s3 buckets"
+  type        = string
+  default     = "alias/woofle-pemc-s3"
+  description = "alias of the shared sandbox S3 CMK, provisioned in live/sandbox/_bootstrap"
 }

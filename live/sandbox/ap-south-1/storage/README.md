@@ -4,8 +4,9 @@
 
 Sandbox account storage in `ap-south-1`:
 
-- `aws_kms_key.storage` / `aws_kms_alias.storage` — a dedicated CMK for this bucket, key rotation enabled.
-- `module.storage` ([modules/aws/s3-bucket](../../../../modules/aws/s3-bucket)) — the S3 bucket itself, with versioning enabled and encrypted using the CMK above. Public access blocking and SSE-KMS encryption are enforced unconditionally by that module, not by anything in this stack.
+- `module.storage` ([modules/aws/s3-bucket](../../../../modules/aws/s3-bucket)) — the S3 bucket itself, with versioning enabled and encrypted using the shared sandbox S3 CMK. Public access blocking and SSE-KMS encryption are enforced unconditionally by that module, not by anything in this stack.
+
+The CMK itself (`alias/woofle-pemc-s3`) is provisioned in [live/sandbox/_bootstrap](../../_bootstrap) — shared across sandbox S3 buckets rather than dedicated to this one — and looked up here via `data.aws_kms_alias.storage` rather than a hardcoded ARN.
 
 <!-- BEGIN_TF_DOCS -->
 ## Inputs
@@ -13,8 +14,7 @@ Sandbox account storage in `ap-south-1`:
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_bucket_name"></a> [bucket\_name](#input\_bucket\_name) | n/a | `string` | `"woofle-pemc-sandbox-storage"` | no |
-| <a name="input_kms_key_alias"></a> [kms\_key\_alias](#input\_kms\_key\_alias) | n/a | `string` | `"alias/woofle-pemc-s3"` | no |
-| <a name="input_kms_key_description"></a> [kms\_key\_description](#input\_kms\_key\_description) | n/a | `string` | `"CMK for the sandbox storage s3 buckets"` | no |
+| <a name="input_kms_key_alias"></a> [kms\_key\_alias](#input\_kms\_key\_alias) | alias of the shared sandbox S3 CMK, provisioned in live/sandbox/\_bootstrap | `string` | `"alias/woofle-pemc-s3"` | no |
 | <a name="input_versioning_enabled"></a> [versioning\_enabled](#input\_versioning\_enabled) | n/a | `bool` | `true` | no |
 
 ## Outputs
@@ -41,16 +41,11 @@ Sandbox account storage in `ap-south-1`:
 
 ## Daily cost
 
-Per [docs/cost-model.md](../../../../docs/cost-model.md):
-
-- The CMK this stack creates: fixed $1/mo (~$0.033/day) + $0.000003 per request.
-- The S3 bucket itself: listed under "≈ nothing / Ignore".
-
-So this stack runs at roughly **$0.033/day**, driven entirely by the CMK — the bucket itself is free in practice.
+Per [docs/cost-model.md](../../../../docs/cost-model.md), the S3 bucket itself is listed under "≈ nothing / Ignore" — so this stack runs at roughly **$0/day**. The shared CMK's cost (fixed $1/mo + $0.000003/request) is billed against [live/sandbox/_bootstrap](../../_bootstrap), which creates it.
 
 ## Running it locally
 
-This stack has a split credential requirement: its **state** lives in the management account's bucket, but the **resources** it provisions (CMK, S3 bucket) live in the sandbox account. So you need the management profile for the backend, and sandbox credentials active for the provider.
+This stack has a split credential requirement: its **state** lives in the management account's bucket, but the **resource** it provisions (the S3 bucket) lives in the sandbox account. So you need the management profile for the backend, and sandbox credentials active for the provider.
 
 ```sh
 export AWS_PROFILE=sandbox   # used by the aws provider to create resources
@@ -66,7 +61,7 @@ terraform apply
 terraform destroy
 ```
 
-`terraform destroy` is the normal path — `pemc-apply`'s boundary permits it, and the fix in [live/sandbox/_bootstrap](../../_bootstrap) scopes `DenyKmsKeyDestruction` to the state key only, so this stack's own CMK can be destroyed. If the CMK is ever orphaned outside of state (destroy fails, manual creation, etc.), fall back to the [KMS CMK section of the teardown runbook](../../../../docs/teardown-runbook.md#6-kms-cmk) — but never schedule deletion for `alias/woofle-pemc-tfstate`, only for `alias/woofle-pemc-s3` (this stack's key).
+`terraform destroy` is the normal path, it removes the S3 bucket. The CMK (`alias/woofle-pemc-s3`) is destroyed, if ever, from [live/sandbox/_bootstrap](../../_bootstrap) instead — `pemc-apply`'s boundary scopes `DenyKmsKeyDestruction` to the state key only, so that stack's copy of this key can be destroyed. If it's ever orphaned outside of state, fall back to the [KMS CMK section of the teardown runbook](../../../../docs/teardown-runbook.md#6-kms-cmk) — but never schedule deletion for `alias/woofle-pemc-tfstate`, only for `alias/woofle-pemc-s3`.
 
 ## State file
 
