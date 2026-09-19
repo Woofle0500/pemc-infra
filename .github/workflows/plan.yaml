@@ -1,0 +1,40 @@
+name: Plan
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "live/**"
+      - ".github/workflows/**"
+
+concurrency:
+  group: plan-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configure AWS credentials (sandbox)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::782747473473:role/pemc-plan
+          aws-region: ap-south-1
+
+      # TEMPORARY: for testing only, remove this step once the sandbox
+      # credentials above are confirmed working end to end.
+      - name: Configure AWS credentials (management, testing only)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::730335219774:role/pemc-plan
+          aws-region: ap-south-1
