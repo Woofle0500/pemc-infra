@@ -17,11 +17,3 @@ output "storage_kms_key_arn" {
 output "storage_kms_key_alias" {
   value = aws_kms_alias.storage.name
 }
-
-output "plan_output_bucket_id" {
-  value = aws_s3_bucket.plan_output.id
-}
-
-output "plan_output_bucket_arn" {
-  value = aws_s3_bucket.plan_output.arn
-}

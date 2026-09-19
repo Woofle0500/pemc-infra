@@ -1,17 +1,27 @@
 # _bootstrap
 
-Provisions the shared Terraform state backend in AWS: the S3 bucket (`woofle-pemc-tfstate`), its versioning/SSE/public-access-block/lifecycle config, the KMS CMK used to encrypt it, and a bucket policy that enforces KMS encryption, HTTPS-only access, and blocks deletion of `terraform.tfstate` objects/versions. This runs in the **management** AWS account (`ap-south-1`), since it's the account that owns the org-wide state bucket every other stack backends into.
+Provisions the shared Terraform state backend in AWS: the S3 bucket (`woofle-pemc-tfstate`), its versioning/SSE/public-access-block/lifecycle config, the KMS CMK used to encrypt it, and a bucket policy that enforces KMS encryption, HTTPS-only access, and blocks deletion of `terraform.tfstate` objects/versions. This runs in the **management** AWS account (`ap-south-1`), since it's the account that owns the org-wide state bucket every other stack backends into. It also owns the central Terraform run bucket (below), for the same reason: it's the one account every stack's CI pipeline already has a role in.
 
-It also provisions the GitHub Actions OIDC provider and the two CI roles that every other stack's pipeline assumes to read/write its state: `pemc-tfstate-plan` and `pemc-tfstate-apply`.
+It also provisions the GitHub Actions OIDC provider and the two CI roles that every other stack's pipeline assumes: `pemc-management-plan` and `pemc-management-apply`.
 
 ## CI roles
 
 Both roles are assumed via `sts:AssumeRoleWithWebIdentity` against the GitHub Actions OIDC provider (`aws_iam_openid_connect_provider.github_actions`) — no long-lived AWS credentials are stored in GitHub.
 
-- **`pemc-tfstate-plan`** — assumable from any pull request in this repo (`token.actions.githubusercontent.com:sub = repo:.../pemc-infra@...:pull_request`). Read-only: `s3:ListBucket`/`s3:GetObject` on `live/*/terraform.tfstate`, lock-file management, and `kms:Decrypt`/`kms:GenerateDataKey` on the state CMK.
-- **`pemc-tfstate-apply`** — assumable only from the `sandbox-apply` GitHub Actions environment. Everything `pemc-tfstate-plan` has, plus `s3:PutObject` on `live/*/terraform.tfstate`. `max_session_duration` is 3 hours (default 1 hour is tight for a long apply).
+- **`pemc-management-plan`** — assumable from any pull request in this repo (`token.actions.githubusercontent.com:sub = repo:.../pemc-infra@...:pull_request`). Read-only on state: `s3:ListBucket`/`s3:GetObject` on `live/*/terraform.tfstate`, lock-file management, and `kms:Decrypt`/`kms:GenerateDataKey` on the shared CMK. Also `s3:PutObject` on the run bucket (see below) — no extra KMS grant needed, `kms:GenerateDataKey` is already covered by the state permissions since it's the same key.
+- **`pemc-management-apply`** — assumable only from the `sandbox-apply` GitHub Actions environment. Everything `pemc-management-plan` has (including the run-bucket write, inherited via `source_policy_documents`, but kept explicit here too — see `WriteRunObjectsExplicit`), plus `s3:PutObject` on `live/*/terraform.tfstate`, and `s3:GetObject`/`s3:ListBucket` on the run bucket (to read back `summary.json` before applying, and to write its own apply output after). `max_session_duration` is 3 hours (default 1 hour is tight for a long apply).
 
 Both roles carry an explicit `DenyBootstrapStateAccess` statement blocking `s3:GetObject`/`s3:PutObject`/`s3:DeleteObject` on `live/_bootstrap/*` and `live/sandbox/_bootstrap/*` — CI never plans or applies either bootstrap stack, so it has no business touching their state files even though the `live/*/terraform.tfstate` glob would otherwise match them.
+
+## Shared CMK
+
+`aws_kms_key.management_cmk` / `aws_kms_alias.management_cmk` (`alias/woofle-pemc-s3-shared`) is the CMK used by both the state bucket and the run bucket below.
+
+## Terraform run bucket
+
+`aws_s3_bucket.tf_run` (`woofle-pemc-tf-run`) holds per-run Terraform artifacts from both CI roles: `pemc-management-plan` writes plan output on pull requests; `pemc-management-apply` reads back while applying and writes its own outputs afterward. It's central across every account this repo provisions into, not per-account, because both CI roles that need it already live here rather than in each workload account — no cross-account bucket/key policy is needed. Versioning is enabled for lifecycle behavior and overwrite visibility, not recovery — these are transient CI artifacts, expired after ~7 days current / ~1 day noncurrent (`aws_s3_bucket_lifecycle_configuration.tf_run`), and there's nothing worth restoring once they age out. No Object Lock.
+
+Its bucket policy (`tf_run_bucket_policy`) is deny-only, same style as the state bucket policy above: denies `s3:PutObject` unless SSE-KMS with the correct key is specified, and denies any access over plain HTTP. Unlike the state bucket, it has no delete-protection statements — the run artifacts stored here aren't relied on for recovery.
 
 ## Running it
 

@@ -41,5 +41,5 @@ jobs:
       - name: Configure AWS credentials (management, testing only)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: arn:aws:iam::730335219774:role/pemc-tfstate-plan
+          role-to-assume: arn:aws:iam::730335219774:role/pemc-management-plan
           aws-region: ap-south-1

@@ -61,7 +61,7 @@ terraform apply
 terraform destroy
 ```
 
-`terraform destroy` is the normal path, it removes the S3 bucket. The CMK (`alias/woofle-pemc-s3`) is destroyed, if ever, from [live/sandbox/_bootstrap](../../_bootstrap) instead — `pemc-apply`'s boundary scopes `DenyKmsKeyDestruction` to the state key only, so that stack's copy of this key can be destroyed. If it's ever orphaned outside of state, fall back to the [KMS CMK section of the teardown runbook](../../../../docs/teardown-runbook.md#6-kms-cmk) — but never schedule deletion for `alias/woofle-pemc-tfstate`, only for `alias/woofle-pemc-s3`.
+`terraform destroy` is the normal path, it removes the S3 bucket. The CMK (`alias/woofle-pemc-s3`) is destroyed, if ever, from [live/sandbox/_bootstrap](../../_bootstrap) instead — `pemc-apply`'s boundary scopes `DenyKmsKeyDestruction` to the state key only, so that stack's copy of this key can be destroyed. If it's ever orphaned outside of state, fall back to the [KMS CMK section of the teardown runbook](../../../../docs/teardown-runbook.md#6-kms-cmk) — but never schedule deletion for `alias/woofle-pemc-s3-shared`, only for `alias/woofle-pemc-s3`.
 
 ## State file
 

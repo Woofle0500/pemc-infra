@@ -121,153 +121,6 @@ resource "aws_kms_alias" "storage" {
   target_key_id = aws_kms_key.storage.id
 }
 
-// Plan output bucket: pemc-plan writes the plan output here on pull requests
-// (the tfplan binary, tfplan.json, tfplan.txt, and a summary.json), pemc-apply
-// reads summary.json before applying. Versioning is on for lifecycle/overwrite
-// visibility, not recovery - the short expirations below mean there's
-// nothing worth restoring once an object ages out.
-resource "aws_s3_bucket" "plan_output" {
-  bucket = var.plan_output_bucket_name
-}
-
-resource "aws_s3_bucket_versioning" "plan_output" {
-  bucket = aws_s3_bucket.plan_output.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "plan_output" {
-  bucket = aws_s3_bucket.plan_output.id
-  rule {
-    bucket_key_enabled = true
-    apply_server_side_encryption_by_default {
-      sse_algorithm     = "aws:kms"
-      kms_master_key_id = aws_kms_key.storage.arn
-    }
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "plan_output" {
-  bucket                  = aws_s3_bucket.plan_output.id
-  block_public_acls       = true
-  ignore_public_acls      = true
-  block_public_policy     = true
-  restrict_public_buckets = true
-}
-
-// Plan output objects are transient CI hand-off artifacts, not backups - expire
-// current versions after ~7 days and noncurrent versions after ~1 day.
-resource "aws_s3_bucket_lifecycle_configuration" "plan_output" {
-  bucket = aws_s3_bucket.plan_output.id
-  rule {
-    id     = "plan-output-cleanup"
-    status = "Enabled"
-    expiration {
-      days = 7
-    }
-    noncurrent_version_expiration {
-      noncurrent_days = 1
-    }
-  }
-}
-
-// Deny-only, same style as the state bucket policy in live/_bootstrap:
-// enforce KMS encryption with the right key and HTTPS-only access. No
-// delete-protection statements - unlike tfstate, plan output objects are
-// meant to expire and aren't relied on for recovery.
-data "aws_iam_policy_document" "plan_output_bucket_policy" {
-  statement {
-    sid    = "DenyIncorrectEncryptionType"
-    effect = "Deny"
-    principals {
-      type        = "*"
-      identifiers = ["*"]
-    }
-    actions   = ["s3:PutObject"]
-    resources = ["${aws_s3_bucket.plan_output.arn}/*"]
-    condition {
-      test     = "StringNotEquals"
-      variable = "s3:x-amz-server-side-encryption"
-      values   = ["aws:kms"]
-    }
-    condition {
-      test     = "Null"
-      variable = "s3:x-amz-server-side-encryption"
-      values   = ["false"]
-    }
-  }
-
-  statement {
-    sid    = "DenyWrongKMSKey"
-    effect = "Deny"
-    principals {
-      type        = "*"
-      identifiers = ["*"]
-    }
-    actions   = ["s3:PutObject"]
-    resources = ["${aws_s3_bucket.plan_output.arn}/*"]
-    condition {
-      test     = "StringNotEquals"
-      variable = "s3:x-amz-server-side-encryption-aws-kms-key-id"
-      values   = [aws_kms_key.storage.arn]
-    }
-    condition {
-      test     = "Null"
-      variable = "s3:x-amz-server-side-encryption-aws-kms-key-id"
-      values   = ["false"]
-    }
-  }
-
-  statement {
-    sid    = "DenyInsecureTransport"
-    effect = "Deny"
-    principals {
-      type        = "*"
-      identifiers = ["*"]
-    }
-    actions = ["s3:*"]
-    resources = [
-      aws_s3_bucket.plan_output.arn,
-      "${aws_s3_bucket.plan_output.arn}/*"
-    ]
-    condition {
-      test     = "Bool"
-      variable = "aws:SecureTransport"
-      values   = ["false"]
-    }
-  }
-}
-
-resource "aws_s3_bucket_policy" "plan_output_bucket_policy" {
-  bucket = aws_s3_bucket.plan_output.id
-  policy = data.aws_iam_policy_document.plan_output_bucket_policy.json
-}
-
-// pemc-plan's ReadOnlyAccess policy doesn't cover writing plan output objects
-// or generating a data key to encrypt them, so grant just that.
-data "aws_iam_policy_document" "pemc_plan_output_write" {
-  statement {
-    sid       = "WritePlanOutputObjects"
-    effect    = "Allow"
-    actions   = ["s3:PutObject"]
-    resources = ["${aws_s3_bucket.plan_output.arn}/*"]
-  }
-
-  statement {
-    sid       = "EncryptPlanOutputObjects"
-    effect    = "Allow"
-    actions   = ["kms:GenerateDataKey*"]
-    resources = [aws_kms_key.storage.arn]
-  }
-}
-
-resource "aws_iam_role_policy" "pemc_plan_output_write" {
-  name   = "pemc-plan-output-write"
-  role   = aws_iam_role.pemc_plan.id
-  policy = data.aws_iam_policy_document.pemc_plan_output_write.json
-}
-
 // pemc-apply: assumed by CI when applying against the sandbox-apply
 // environment. Broader than pemc-plan (it has to actually create/change
 // infra), but the boundary below still keeps it away from IAM/org/SSO
@@ -452,15 +305,13 @@ data "aws_iam_policy_document" "pemc_apply_boundary" {
     resources = ["*"]
   }
 
-  // Same as DenyDataPlaneReads above, carved out separately because apply
-  // does have a legitimate reason to read one specific bucket: the plan
-  // output bucket, where it reads back the plan output (summary.json) 
-  // pemc-plan wrote.
+  // Same as DenyDataPlaneReads above. Apply has no legitimate reason to read
+  // object contents in this account.
   statement {
-    sid           = "DenyS3ObjectReadsExceptPlanOutput"
-    effect        = "Deny"
-    actions       = ["s3:GetObject"]
-    not_resources = ["${aws_s3_bucket.plan_output.arn}/*"]
+    sid       = "DenyS3ObjectReads"
+    effect    = "Deny"
+    actions   = ["s3:GetObject"]
+    resources = ["*"]
   }
 
   // Credential-adjacent reads: instance password data, function environment
@@ -494,32 +345,6 @@ resource "aws_iam_role" "pemc_apply" {
 resource "aws_iam_role_policy_attachment" "pemc_apply_poweruser" {
   role       = aws_iam_role.pemc_apply.name
   policy_arn = "arn:aws:iam::aws:policy/PowerUserAccess"
-}
-
-// PowerUserAccess already covers s3:GetObject/ListBucket and kms:Decrypt on
-// the shared CMK; this statement exists so the grant is explicit rather
-// than incidental, and survives if the managed policy attachment above is
-// ever narrowed.
-data "aws_iam_policy_document" "pemc_apply_output_read" {
-  statement {
-    sid       = "ListPlanOutputBucket"
-    effect    = "Allow"
-    actions   = ["s3:ListBucket"]
-    resources = [aws_s3_bucket.plan_output.arn]
-  }
-
-  statement {
-    sid       = "ReadPlanOutputObjects"
-    effect    = "Allow"
-    actions   = ["s3:GetObject"]
-    resources = ["${aws_s3_bucket.plan_output.arn}/*"]
-  }
-}
-
-resource "aws_iam_role_policy" "pemc_apply_output_read" {
-  name   = "pemc-apply-output-read"
-  role   = aws_iam_role.pemc_apply.id
-  policy = data.aws_iam_policy_document.pemc_apply_output_read.json
 }
 
 // IAM policy that only allows the root user of management account

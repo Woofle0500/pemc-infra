@@ -51,8 +51,3 @@ variable "kms_key_description" {
   type    = string
   default = "CMK for sandbox account s3 buckets"
 }
-
-variable "plan_output_bucket_name" {
-  type    = string
-  default = "woofle-pemc-sandbox-plan-output"
-}
