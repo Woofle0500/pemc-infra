@@ -1,33 +1,3 @@
-moved {
-  from = aws_kms_key.state_bucket_kms
-  to   = aws_kms_key.management_cmk
-}
-
-moved {
-  from = aws_kms_alias.state_bucket_key_alias
-  to   = aws_kms_alias.management_cmk
-}
-
-moved {
-  from = aws_iam_role.tfstate_plan
-  to   = aws_iam_role.management_plan
-}
-
-moved {
-  from = aws_iam_role_policy.tfstate_plan_permissions
-  to   = aws_iam_role_policy.management_plan_permissions
-}
-
-moved {
-  from = aws_iam_role.tfstate_apply
-  to   = aws_iam_role.management_apply
-}
-
-moved {
-  from = aws_iam_role_policy.tfstate_apply_permissions
-  to   = aws_iam_role_policy.management_apply_permissions
-}
-
 resource "aws_s3_bucket" "state_bucket" {
   bucket = var.state_bucket_name
   lifecycle {
