@@ -88,13 +88,18 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           MERGE_SHA: ${{ github.sha }}
+          STACK_SLUG: ${{ steps.slug.outputs.slug }}
         run: |
           state_serial=$(jq -r '.prior_state.serial // empty' plan.json)
 
+          # comment.md is named with the stack slug baked in, not left
+          # generic - post-pr-comment downloads every stack's artifact
+          # with merge-multiple:true (flat, single directory), so a
+          # generic name would collide across stacks.
           python3 "$GITHUB_WORKSPACE/tools/summarize_plan/summarize_plan.py" \
             plan.json \
             --summary-json summary.json \
-            --comment-body comment.md \
+            --comment-body "comment-${STACK_SLUG}.md" \
             --metadata-json metadata.json \
             --head-sha "$HEAD_SHA" \
             --merge-sha "$MERGE_SHA" \
@@ -139,5 +144,5 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: plan-comment-${{ steps.slug.outputs.slug }}
-          path: ${{ inputs.stack }}/comment.md
+          path: ${{ inputs.stack }}/comment-${{ steps.slug.outputs.slug }}.md
           retention-days: 1

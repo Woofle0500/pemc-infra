@@ -227,11 +227,19 @@ jobs:
           echo "::error::One or more stack plans failed; not posting a possibly-incomplete comment."
           exit 1
 
+      # merge-multiple:true forces every matched artifact's files into one
+      # flat `comments/` directory, always - without it, download-artifact
+      # extracts a lone match directly into `path` (no per-artifact
+      # subfolder) but nests 2+ matches into per-artifact subfolders, so
+      # the layout would change shape depending on stack count.
+      # Flat is safe here because comment-<slug>.md already has the slug
+      # written into the filename.
       - name: Download plan comment fragments
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           pattern: plan-comment-*
           path: comments
+          merge-multiple: true
 
       - name: Assemble PR comment body
         run: |
@@ -239,12 +247,13 @@ jobs:
             echo "<!-- pemc-plan-comment -->"
             echo "## Terraform plan results"
             echo
-            for dir in $(find comments -mindepth 1 -maxdepth 1 -type d | sort); do
-              stack_slug="${dir#comments/plan-comment-}"
+            for f in $(find comments -maxdepth 1 -type f -name 'comment-*.md' | sort); do
+              stack_slug="$(basename "$f" .md)"
+              stack_slug="${stack_slug#comment-}"
               echo "<details>"
               echo "<summary><code>${stack_slug}</code></summary>"
               echo
-              cat "$dir/comment.md"
+              cat "$f"
               echo "</details>"
               echo
             done
