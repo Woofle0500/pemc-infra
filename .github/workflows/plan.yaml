@@ -296,3 +296,16 @@ jobs:
                 body,
               });
             }
+
+  plan-gate:
+    name: Plan
+    runs-on: ubuntu-latest
+    needs: plan
+    if: always()
+    steps:
+      - name: Check job results
+        run: |
+          if [ "${{ needs.plan.result }}" != "success" ]; then
+            echo "One or more stacks failed to plan, or the least-privilege assertions failed"
+            exit 1
+          fi
