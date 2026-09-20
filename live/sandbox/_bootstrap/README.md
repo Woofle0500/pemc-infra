@@ -1,6 +1,6 @@
 # sandbox/_bootstrap
 
-Provisions the CI identity and access setup for the **sandbox** AWS account: a GitHub Actions OIDC provider, the `pemc-plan`/`pemc-apply` roles CI assumes to plan/apply against this account, and a hardened trust policy on `OrganizationAccountAccessRole` for break-glass access. This runs in the **sandbox** AWS account (`ap-south-1`) — it's the account being provisioned into, distinct from the management account that owns the shared state bucket.
+Provisions the CI identity and access setup for the **sandbox** AWS account: a GitHub Actions OIDC provider, the `pemc-plan`/`pemc-apply` roles CI assumes to plan/apply against this account, a hardened trust policy on `OrganizationAccountAccessRole` for break-glass access, and the shared CMK used by sandbox S3 buckets. This runs in the **sandbox** AWS account (`ap-south-1`) — it's the account being provisioned into, distinct from the management account that owns the shared state bucket and the central Terraform run bucket (see [live/_bootstrap](../../_bootstrap)).
 
 ## CI roles
 
@@ -18,7 +18,12 @@ Both roles have a permission boundary (`pemc-plan-boundary` / `pemc-apply-bounda
   - Targeted IAM privilege-escalation actions (creating users/credentials, attaching policies to users/groups) rather than blanket `iam:*`, since apply does legitimately need to create/manage *roles*.
   - Boundary manipulation — apply can't remove/replace another role's boundary, or modify its own boundary policy.
   - `iam:CreateRole`/`PutRolePolicy`/`AttachRolePolicy` are denied *unless* the target role is itself constrained by this same boundary (`iam:PermissionsBoundary` condition) — otherwise apply could create an unbounded role and use it to escape its own limits.
-  - `organizations:*`, `sso:*`, KMS decrypt/data-key generation on the state CMK, `kms:ScheduleKeyDeletion`/`DisableKey`, `sts:AssumeRole*` (apply has no legitimate reason to pivot into another role), deleting from the shared state bucket, `ec2:CreateNatGateway`, data-plane reads (S3 object contents, DynamoDB items, SQS messages, log events), and credential-adjacent reads (EC2 instance password data, Lambda env config, ECR auth tokens).
+  - `organizations:*`, `sso:*`, KMS decrypt/data-key generation on the state CMK, `kms:ScheduleKeyDeletion`/`DisableKey`, `sts:AssumeRole*` (apply has no legitimate reason to pivot into another role), deleting from the shared state bucket, `ec2:CreateNatGateway`, data-plane reads (DynamoDB items, SQS messages, log events), and credential-adjacent reads (EC2 instance password data, Lambda env config, ECR auth tokens).
+  - `s3:GetObject` is denied everywhere, full stop (`DenyS3ObjectReads`) — apply in this account has no legitimate reason to read object contents.
+
+## Shared sandbox S3 CMK
+
+`aws_kms_key.storage` / `aws_kms_alias.storage` is the CMK used by every general-purpose S3 bucket in the sandbox account ([ap-south-1/storage](../ap-south-1/storage), which looks it up by alias rather than provisioning its own). It lives here rather than in a consuming stack so it isn't tied to any one bucket's lifecycle.
 
 ## Break-glass: `OrganizationAccountAccessRole`
 
@@ -40,6 +45,7 @@ change `sandbox-backend-config.hcl.example` file:
 ```hcl
 profile = <management-account-profile>
 ```
+
 ## State
 
 - Bucket: `woofle-pemc-tfstate`

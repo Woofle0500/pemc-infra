@@ -2,18 +2,26 @@ output "tf_state_bucket_name" {
   value = aws_s3_bucket.state_bucket.id
 }
 
-output "tf_state_kms_key_arn" {
-  value = aws_kms_key.state_bucket_kms.arn
+output "management_cmk_arn" {
+  value = aws_kms_key.management_cmk.arn
 }
 
-output "tf_state_kms_key_alias" {
-  value = aws_kms_alias.state_bucket_key_alias.name
+output "management_cmk_alias" {
+  value = aws_kms_alias.management_cmk.name
 }
 
-output "tfstate_plan_role_arn" {
-  value = aws_iam_role.tfstate_plan.arn
+output "management_plan_role_arn" {
+  value = aws_iam_role.management_plan.arn
 }
 
-output "tfstate_apply_role_arn" {
-  value = aws_iam_role.tfstate_apply.arn
+output "management_apply_role_arn" {
+  value = aws_iam_role.management_apply.arn
+}
+
+output "tf_run_bucket_id" {
+  value = aws_s3_bucket.tf_run.id
+}
+
+output "tf_run_bucket_arn" {
+  value = aws_s3_bucket.tf_run.arn
 }

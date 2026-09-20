@@ -122,8 +122,9 @@ done
 aws kms schedule-key-deletion --region ap-south-1 --key-id <key-id-or-arn> \
   --pending-window-in-days 7
 
-# Do NOT schedule deletion for alias/woofle-pemc-tfstate (naming.md) unless the
-# state bucket itself is being decommissioned — this key protects Terraform state.
+# Do NOT schedule deletion for alias/woofle-pemc-s3-shared (naming.md) unless
+# both the state bucket and the Terraform run bucket are being decommissioned —
+# this key protects Terraform state and encrypts the run bucket.
 ```
 
 ---

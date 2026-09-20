@@ -8,7 +8,7 @@ But before reverting to a previous version, make sure that it's a tfstate corrup
 Run `terraform plan` and look for a message like `api error KMS.DisabledException: <KMS-key ARN> is disabled.`. If you see that message, confirm KMS key's state by running:
 ```bash
 # to grab the TargetKeyId
-aws kms list-aliases --query "Aliases[?AliasName=='alias/woofle-pemc-tfstate']"
+aws kms list-aliases --query "Aliases[?AliasName=='alias/woofle-pemc-s3-shared']"
 ```
 Then:
 ```bash

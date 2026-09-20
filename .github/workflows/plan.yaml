@@ -1,0 +1,311 @@
+name: Plan
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "live/**"
+      - ".github/workflows/**"
+
+concurrency:
+  group: plan-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  discover-stacks:
+    name: Discover stacks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      stacks: ${{ steps.find.outputs.stacks }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Exclude any directory named `_bootstrap`, at any depth (the
+      # root state-bucket bootstrap and every per-account bootstrap
+      # alike) - CI never plans or applies a bootstrap stack, see
+      # live/_bootstrap/README.md and the DenyBootstrapStateAccess
+      # statement on the management plan role.
+      - name: Find stack directories
+        id: find
+        run: |
+          stacks=$(find live -type d -name '_bootstrap' -prune -o -type f -name '*.tf' -exec dirname {} \; \
+            | sort -u | jq -R -s -c 'split("\n")[:-1]')
+
+          if [ "$stacks" = "[]" ]; then
+            echo "::error::No Terraform stacks found under live/ (excluding _bootstrap directories)."
+            exit 1
+          fi
+
+          echo "stacks=$stacks" >> "$GITHUB_OUTPUT"
+
+  # Inverted assertions: every probe here is expected to fail. The job only
+  # passes if each AWS call comes back denied for the specific reason we
+  # expect - a probe that unexpectedly succeeds, or fails for an unrelated
+  # reason, fails the job. This is what actually proves the least-privilege
+  # boundaries in live/_bootstrap and live/sandbox/_bootstrap hold, rather
+  # than just trusting the Terraform that defines them.
+  assert-least-privilege:
+    name: Assert least privilege
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Write assertion helpers
+        run: |
+          cat > "$RUNNER_TEMP/lp-assert.sh" <<'SCRIPT'
+          # assert_denied DESC EXPECT_PATTERN CMD...
+          # Runs CMD, which must fail. Fails the job if CMD unexpectedly
+          # succeeds, or if it failed for a reason other than EXPECT_PATTERN
+          # (a case-insensitive grep against combined stdout+stderr) -
+          # either outcome means the boundary this probe checks doesn't
+          # actually hold.
+          assert_denied() {
+            local desc="$1" expect="$2"; shift 2
+            local out
+            if out=$("$@" 2>&1); then
+              echo "::error::${desc}: expected to be denied, but the call succeeded"
+              echo "$out"
+              return 1
+            fi
+            if echo "$out" | grep -qiE "$expect"; then
+              echo "OK: ${desc} was denied as expected"
+              return 0
+            fi
+            echo "::error::${desc}: call failed, but not with the expected error (wanted /${expect}/)"
+            echo "$out"
+            return 1
+          }
+
+          # assert_allowed DESC CMD...
+          assert_allowed() {
+            local desc="$1"; shift
+            local out
+            if ! out=$("$@" 2>&1); then
+              echo "::error::${desc}: expected to succeed, but the call failed"
+              echo "$out"
+              return 1
+            fi
+            echo "OK: ${desc} succeeded as expected"
+            return 0
+          }
+          SCRIPT
+
+      - name: Configure AWS credentials (sandbox pemc-plan)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::782747473473:role/pemc-plan
+          aws-region: ap-south-1
+
+      # --dry-run makes EC2 evaluate IAM only and never perform the write -
+      # DryRunOperation means it would have been allowed, UnauthorizedOperation
+      # means it was actually denied. CreateKeyPair is used because
+      # it creates a brand new resource, so dry-run doesn't need anything
+      # to already exist before it can evaluate the permission.
+      - name: pemc-plan cannot write in the sandbox account
+        run: |
+          source "$RUNNER_TEMP/lp-assert.sh"
+          assert_denied "pemc-plan EC2 write (dry-run probe)" "UnauthorizedOperation" \
+            aws ec2 create-key-pair --dry-run --key-name pemc-least-privilege-probe
+
+      - name: pemc-plan cannot read SSM parameters
+        run: |
+          source "$RUNNER_TEMP/lp-assert.sh"
+          assert_denied "pemc-plan ssm:GetParameter" "AccessDenied" \
+            aws ssm get-parameter --name /pemc/kill-switch
+
+      # pemc-plan's ReadOnlyAccess grants s3:ListBucket, which is not denied
+      # by the boundary - so S3 will mask a missing key as 404 instead of
+      # 403, regardless of whether GetObject itself is allowed. Testing
+      # this needs a key that's known to exist; if it doesn't, fail loudly
+      # (rather than silently pass on a meaningless 404) with instructions
+      # to seed it once via an admin profile.
+      - name: pemc-plan cannot read object contents in a sandbox bucket
+        run: |
+          out=$(aws s3api get-object --bucket woofle-pemc-sandbox-storage \
+            --key _least-privilege-canary.txt "$RUNNER_TEMP/canary-out" 2>&1) && rc=0 || rc=$?
+
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::pemc-plan s3:GetObject: expected to be denied, but the call succeeded"
+            exit 1
+          fi
+
+          if echo "$out" | grep -qiE "NoSuchKey|404"; then
+            echo "::error::pemc-plan s3:GetObject: s3://woofle-pemc-sandbox-storage/_least-privilege-canary.txt does not exist, so this probe is inconclusive (a missing key returns 404 rather than AccessDenied, since pemc-plan still has s3:ListBucket). Seed it once with an admin profile: printf 'least-privilege canary - do not delete' | aws s3 cp - s3://woofle-pemc-sandbox-storage/_least-privilege-canary.txt --sse aws:kms --sse-kms-key-id alias/woofle-pemc-s3"
+            exit 1
+          fi
+
+          if echo "$out" | grep -qi "AccessDenied"; then
+            echo "OK: pemc-plan s3:GetObject was denied as expected"
+          else
+            echo "::error::pemc-plan s3:GetObject: call failed, but not with AccessDenied"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: Fetch GitHub OIDC token for management probes
+        id: oidc-token
+        run: |
+          token_file="$RUNNER_TEMP/lp-management-oidc-token.jwt"
+          curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
+            | jq -r '.value' > "$token_file"
+          echo "token-file=$token_file" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (management pemc-management-plan)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::730335219774:role/pemc-management-plan
+          aws-region: ap-south-1
+
+      # pemc-management-plan's identity policy only grants PutObject/DeleteObject
+      # on *.tflock paths (ManageLockFiles) - plain terraform.tfstate writes are
+      # reserved for pemc-management-apply. Uses a canary key that doesn't
+      # correspond to any real stack's state, so a bug here can't corrupt
+      # anything - worst case it leaves a stray object under that prefix.
+      - name: pemc-management-plan cannot write state, but can manage its lock file
+        run: |
+          source "$RUNNER_TEMP/lp-assert.sh"
+          echo "least-privilege probe" > "$RUNNER_TEMP/probe.txt"
+          canary_prefix="live/_assert-least-privilege-canary"
+
+          assert_denied "pemc-management-plan s3:PutObject on terraform.tfstate" "AccessDenied" \
+            aws s3 cp "$RUNNER_TEMP/probe.txt" \
+              "s3://woofle-pemc-tfstate/${canary_prefix}/terraform.tfstate" \
+              --sse aws:kms --sse-kms-key-id alias/woofle-pemc-s3-shared
+
+          assert_allowed "pemc-management-plan s3:PutObject on terraform.tfstate.tflock" \
+            aws s3 cp "$RUNNER_TEMP/probe.txt" \
+              "s3://woofle-pemc-tfstate/${canary_prefix}/terraform.tfstate.tflock" \
+              --sse aws:kms --sse-kms-key-id alias/woofle-pemc-s3-shared
+
+          # Clean up the lock-file canary - pemc-management-plan can delete
+          # it too (same ManageLockFiles statement).
+          aws s3 rm "s3://woofle-pemc-tfstate/${canary_prefix}/terraform.tfstate.tflock"
+
+  plan:
+    name: Plan (${{ matrix.stack }})
+    needs: [discover-stacks, assert-least-privilege]
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: ${{ fromJSON(needs.discover-stacks.outputs.stacks) }}
+    uses: ./.github/workflows/_plan_stack.yaml
+    with:
+      stack: ${{ matrix.stack }}
+    permissions:
+      id-token: write
+      contents: read
+
+  # GITHUB_TOKEN is downgraded to read-only for pull_request events
+  # triggered from a fork, so posting a comment isn't possible there -
+  # fail explicitly.
+  post-pr-comment:
+    name: Post PR comment
+    needs: plan
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Fail on fork PRs
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::error::This PR comes from a fork, so GITHUB_TOKEN is read-only here and cannot post PR comments."
+          exit 1
+
+      - name: Fail if any stack plan did not succeed
+        if: needs.plan.result != 'success'
+        run: |
+          echo "::error::One or more stack plans failed; not posting a possibly-incomplete comment."
+          exit 1
+
+      # merge-multiple:true forces every matched artifact's files into one
+      # flat `comments/` directory, always - without it, download-artifact
+      # extracts a lone match directly into `path` (no per-artifact
+      # subfolder) but nests 2+ matches into per-artifact subfolders, so
+      # the layout would change shape depending on stack count.
+      # Flat is safe here because comment-<slug>.md already has the slug
+      # written into the filename.
+      - name: Download plan comment fragments
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: plan-comment-*
+          path: comments
+          merge-multiple: true
+
+      - name: Assemble PR comment body
+        run: |
+          {
+            echo "<!-- pemc-plan-comment -->"
+            echo "## Terraform plan results"
+            echo
+            for f in $(find comments -maxdepth 1 -type f -name 'comment-*.md' | sort); do
+              stack_slug="$(basename "$f" .md)"
+              stack_slug="${stack_slug#comment-}"
+              echo "<details>"
+              echo "<summary><code>${stack_slug}</code></summary>"
+              echo
+              cat "$f"
+              echo "</details>"
+              echo
+            done
+          } > "$RUNNER_TEMP/body.md"
+
+      - name: Post or update PR comment
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          BODY_PATH: ${{ runner.temp }}/body.md
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync(process.env.BODY_PATH, 'utf8');
+            const marker = '<!-- pemc-plan-comment -->';
+            const issue_number = context.payload.pull_request.number;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              per_page: 100,
+            });
+
+            const existing = comments.find(
+              (c) => c.user?.type === 'Bot' && c.body?.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                body,
+              });
+            }
+
+  plan-gate:
+    name: Plan
+    runs-on: ubuntu-latest
+    needs: plan
+    if: always()
+    steps:
+      - name: Check job results
+        run: |
+          if [ "${{ needs.plan.result }}" != "success" ]; then
+            echo "One or more stacks failed to plan, or the least-privilege assertions failed"
+            exit 1
+          fi

@@ -15,8 +15,9 @@
 | CLI profiles | `management` and `sandbox` | Configured using SSO |
 | S3 bucket prefix | `woofle-pemc` | globally unique |
 | State bucket | `woofle-pemc-tfstate` | |
+| Terraform run bucket | `woofle-pemc-tf-run` | Management account; holds per-run plan/apply artifacts, central across all provisioned accounts |
 | Evidence bucket | `woofle-pemc-evidence` | Object Lock, pending |
-| KMS key alias | `alias/woofle-pemc-tfstate` | |
+| KMS key alias | `alias/woofle-pemc-s3-shared` | Management account; shared by the state bucket and the Terraform run bucket |
 | SSM kill switch | `/pemc/kill-switch` | |
 | SSM mode | `/pemc/mode` | |
 

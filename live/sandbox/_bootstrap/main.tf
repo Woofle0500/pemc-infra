@@ -107,6 +107,20 @@ resource "aws_iam_role_policy_attachment" "pemc_plan_readonly" {
   policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
 }
 
+// CMK shared by the sandbox account's S3 buckets. 
+// Reuse it by looking up its alias instead of each
+// provisioning their own key.
+resource "aws_kms_key" "storage" {
+  description             = var.kms_key_description
+  enable_key_rotation     = true
+  deletion_window_in_days = 30
+}
+
+resource "aws_kms_alias" "storage" {
+  name          = var.kms_key_alias
+  target_key_id = aws_kms_key.storage.id
+}
+
 // pemc-apply: assumed by CI when applying against the sandbox-apply
 // environment. Broader than pemc-plan (it has to actually create/change
 // infra), but the boundary below still keeps it away from IAM/org/SSO
@@ -231,11 +245,15 @@ data "aws_iam_policy_document" "pemc_apply_boundary" {
     resources = [var.state_bucket_kms_cmk_arn]
   }
 
+  // This is defense-in-depth guardrail. It prevents state bucket key
+  // deletion. Although it would require the Key itself to allow this role
+  // to delete it, but if that were to every happen due to the config
+  // changes, this will be the backstop.
   statement {
     sid       = "DenyKmsKeyDestruction"
     effect    = "Deny"
     actions   = ["kms:ScheduleKeyDeletion", "kms:DisableKey"]
-    resources = ["*"]
+    resources = [var.state_bucket_kms_cmk_arn]
   }
 
   // Apply is assumed via OIDC and has no legitimate reason to pivot into
@@ -276,7 +294,6 @@ data "aws_iam_policy_document" "pemc_apply_boundary" {
     sid    = "DenyDataPlaneReads"
     effect = "Deny"
     actions = [
-      "s3:GetObject",
       "dynamodb:GetItem",
       "dynamodb:Query",
       "dynamodb:Scan",
@@ -285,6 +302,15 @@ data "aws_iam_policy_document" "pemc_apply_boundary" {
       "logs:GetLogEvents",
       "logs:FilterLogEvents",
     ]
+    resources = ["*"]
+  }
+
+  // Same as DenyDataPlaneReads above. Apply has no legitimate reason to read
+  // object contents in this account.
+  statement {
+    sid       = "DenyS3ObjectReads"
+    effect    = "Deny"
+    actions   = ["s3:GetObject"]
     resources = ["*"]
   }
 
