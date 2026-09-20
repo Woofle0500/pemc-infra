@@ -110,7 +110,7 @@ jobs:
         run: |
           source "$RUNNER_TEMP/lp-assert.sh"
           assert_denied "pemc-plan EC2 write (dry-run probe)" "UnauthorizedOperation" \
-            aws ec2 create-tags --dry-run --resources i-0000000000000000 \
+            aws ec2 create-tags --dry-run --resources i-00000000000000000 \
               --tags Key=pemc-least-privilege-probe,Value=probe
 
       - name: pemc-plan cannot read SSM parameters
