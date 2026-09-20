@@ -245,7 +245,7 @@ data "aws_iam_policy_document" "management_plan_permissions" {
   statement {
     sid       = "ManageLockFiles"
     effect    = "Allow"
-    actions   = ["s3:PutObject", "s3:DeleteObject"]
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
     resources = ["${aws_s3_bucket.state_bucket.arn}/live/*/terraform.tfstate.tflock"]
   }
   statement {
