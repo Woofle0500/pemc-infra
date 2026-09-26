@@ -78,6 +78,14 @@ jobs:
           BACKEND_CONFIG: ${{ steps.backend-config.outputs.file }}
         run: |
           terraform init -backend-config="$BACKEND_CONFIG" -input=false > /dev/null
+          
+          echo "Pulling terraform state serial..."
+          raw_state=$(terraform state pull)
+          if [ -z "$raw_state" ]; then state_serial=0; else state_serial=$(jq -r '.serial' <<<"$raw_state"); fi
+          unset raw_state
+          echo "STATE_SERIAL=$state_serial" >> "$GITHUB_ENV"
+
+          echo "Building terraform plan..."
           terraform plan -out=tfplan -input=false -lock=true > /dev/null
           terraform show tfplan > plan.txt
           terraform show -json tfplan > plan.json
@@ -90,7 +98,7 @@ jobs:
           MERGE_SHA: ${{ github.sha }}
           STACK_SLUG: ${{ steps.slug.outputs.slug }}
         run: |
-          state_serial=$(jq -r '.prior_state.serial // empty' plan.json)
+          state_serial=$STATE_SERIAL
 
           # comment.md is named with the stack slug baked in, not left
           # generic - post-pr-comment downloads every stack's artifact

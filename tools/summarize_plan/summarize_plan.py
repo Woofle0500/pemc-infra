@@ -12,10 +12,18 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
 NOOP_ACTIONS = {"no-op", "read"}
+KINDS = {
+    frozenset({"create"}):           "add",
+    frozenset({"update"}):           "change",
+    frozenset({"delete"}):           "destroy",
+    frozenset({"delete", "create"}): "replace",
+    frozenset({"forget"}):           "forget",
+}
 
 
 def load_plan(path: Path) -> dict[str, Any]:
@@ -28,17 +36,8 @@ def is_relevant(change: dict[str, Any]) -> bool:
     return not set(change["actions"]).issubset(NOOP_ACTIONS)
 
 
-def classify(actions: list[str]) -> str | None:
-    action_set = set(actions)
-    if action_set == {"create"}:
-        return "add"
-    if action_set == {"update"}:
-        return "change"
-    if action_set == {"delete"}:
-        return "destroy"
-    if action_set == {"delete", "create"}:
-        return "replace"
-    return None
+class UnhandledActionError(RuntimeError):
+    """Raised when a resource change's actions aren't recognized, so the plan cannot be safely summarized."""
 
 
 def sensitive_keys(change: dict[str, Any]) -> set[str] | bool:
@@ -76,20 +75,39 @@ def changed_attributes(change: dict[str, Any]) -> list[str]:
 
 
 def build_summary(plan: dict[str, Any]) -> dict[str, Any]:
-    counts = {"add": 0, "change": 0, "destroy": 0, "replace": 0}
+    counts = {
+        "add": 0,
+        "change": 0,
+        "destroy": 0,
+        "replace": 0,
+        "forget": 0,
+        "import": 0,
+        "move": 0,
+    }
     changes = []
 
     for rc in plan.get("resource_changes", []):
         change = rc["change"]
-        if not is_relevant(change):
-            continue
 
-        kind = classify(change["actions"])
+        if change.get("importing"):
+            kind = "import"
+        elif rc.get("previous_address") and rc["previous_address"] != rc["address"]:
+            kind = "move"
+        elif not is_relevant(change):
+            continue
+        else:
+            kind = KINDS.get(frozenset(change["actions"])) # None if action is not recognised.
+
         if kind is None:
-            continue
-
+            raise UnhandledActionError(
+                f"unrecognized action(s) {change['actions']!r} for resource {rc['address']!r}; refusing to summarize an incomplete plan"
+            )
         counts[kind] += 1
-        changes.append({"address": rc["address"], "actions": list(change["actions"])})
+        changes.append({
+            "address": rc["address"], 
+            "actions": list(change["actions"]),
+            "kind": kind
+        })
 
     changes.sort(key=lambda c: c["address"])
 
@@ -101,6 +119,9 @@ ACTION_LABELS = {
     "change": "update",
     "destroy": "destroy",
     "replace": "replace",
+    "forget": "forget",
+    "import": "import",
+    "move": "move",
 }
 
 
@@ -110,7 +131,9 @@ def build_comment_body(plan: dict[str, Any], summary: dict[str, Any]) -> str:
         "### Terraform plan summary",
         "",
         f"Plan: {counts['add']} to add, {counts['change']} to change, "
-        f"{counts['destroy']} to destroy, {counts['replace']} to replace.",
+        f"{counts['destroy']} to destroy, {counts['replace']} to replace, "
+        f"{counts['forget']} to forget, {counts['import']} to import, "
+        f"{counts['move']} to move.",
         "",
     ]
 
@@ -128,7 +151,7 @@ def build_comment_body(plan: dict[str, Any], summary: dict[str, Any]) -> str:
     for entry in summary["changes"]:
         address = entry["address"]
         actions = entry["actions"]
-        kind = classify(actions)
+        kind = entry["kind"]
         label = ACTION_LABELS.get(kind, "/".join(actions))
 
         change = changes_by_address.get(address, {})
@@ -193,7 +216,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     plan = load_plan(args.plan_json)
-    summary = build_summary(plan)
+    try:
+        summary = build_summary(plan)
+    except UnhandledActionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     comment_body = build_comment_body(plan, summary)
     metadata = build_metadata(plan, args)
 

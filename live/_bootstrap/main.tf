@@ -245,7 +245,7 @@ data "aws_iam_policy_document" "management_plan_permissions" {
     sid       = "WriteRunObjects"
     effect    = "Allow"
     actions   = ["s3:PutObject"]
-    resources = ["${aws_s3_bucket.tf_run.arn}/*"]
+    resources = ["${aws_s3_bucket.tf_run.arn}/plans/pr-*"]
   }
 }
 
@@ -317,7 +317,7 @@ data "aws_iam_policy_document" "management_apply_permissions" {
     sid       = "WriteRunObjectsExplicit"
     effect    = "Allow"
     actions   = ["s3:PutObject"]
-    resources = ["${aws_s3_bucket.tf_run.arn}/*"]
+    resources = ["${aws_s3_bucket.tf_run.arn}/plans/main/*"]
   }
 }
 
