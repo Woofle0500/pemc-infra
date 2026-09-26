@@ -25,7 +25,15 @@ def test_no_op_and_data_source_reads_are_dropped(summary):
 
 
 def test_counts_match_fixture(summary):
-    assert summary["counts"] == {"add": 1, "change": 1, "destroy": 1, "replace": 1}
+    assert summary["counts"] == {
+        "add": 1,
+        "change": 1,
+        "destroy": 1,
+        "replace": 1,
+        "forget": 1,
+        "import": 1,
+        "move": 1,
+    }
 
 
 def test_changes_are_sorted_by_address(summary):
@@ -33,9 +41,9 @@ def test_changes_are_sorted_by_address(summary):
     assert addresses == sorted(addresses)
 
 
-def test_summary_entries_only_contain_address_and_actions(summary):
+def test_summary_entries_only_contain_address_actions_and_kind(summary):
     for entry in summary["changes"]:
-        assert set(entry.keys()) == {"address", "actions"}
+        assert set(entry.keys()) == {"address", "actions", "kind"}
 
 
 @pytest.mark.parametrize(
@@ -87,7 +95,90 @@ def test_comment_body_never_leaks_sensitive_values(plan, summary):
 
 def test_comment_body_reports_plan_totals(plan, summary):
     body = sp.build_comment_body(plan, summary)
-    assert "1 to add, 1 to change, 1 to destroy, 1 to replace" in body
+    assert (
+        "1 to add, 1 to change, 1 to destroy, 1 to replace, 1 to forget, 1 to import, 1 to move." in body
+    )
+
+
+def test_forget_is_reported(summary):
+    entry = next(
+        c for c in summary["changes"] if c["address"] == "aws_s3_bucket.forgotten"
+    )
+    assert entry["kind"] == "forget"
+    assert summary["counts"]["forget"] == 1
+
+
+def test_import_is_reported(summary):
+    entry = next(
+        c for c in summary["changes"] if c["address"] == "aws_iam_role.imported"
+    )
+    assert entry["kind"] == "import"
+    assert entry["actions"] == ["no-op"]
+    assert summary["counts"]["import"] == 1
+
+
+def test_rename_via_previous_address_is_reported_as_move(summary):
+    entry = next(
+        c for c in summary["changes"] if c["address"] == "aws_iam_role.renamed"
+    )
+    assert entry["kind"] == "move"
+    assert entry["actions"] == ["no-op"]
+    assert summary["counts"]["move"] == 1
+
+
+def test_unrecognized_action_raises_unhandled_action_error():
+    plan = {
+        "resource_changes": [
+            {
+                "address": "aws_s3_bucket.mystery",
+                "change": {
+                    "actions": ["frobnicate"],
+                    "before": None,
+                    "after": None,
+                    "before_sensitive": False,
+                    "after_sensitive": False,
+                },
+            }
+        ]
+    }
+    with pytest.raises(sp.UnhandledActionError):
+        sp.build_summary(plan)
+
+
+def test_cli_exits_non_zero_for_unrecognized_action(tmp_path):
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "resource_changes": [
+                    {
+                        "address": "aws_s3_bucket.mystery",
+                        "change": {
+                            "actions": ["frobnicate"],
+                            "before": None,
+                            "after": None,
+                            "before_sensitive": False,
+                            "after_sensitive": False,
+                        },
+                    }
+                ]
+            }
+        )
+    )
+
+    exit_code = sp.main(
+        [
+            str(plan_path),
+            "--summary-json",
+            str(tmp_path / "summary.json"),
+            "--comment-body",
+            str(tmp_path / "comment.md"),
+            "--metadata-json",
+            str(tmp_path / "metadata.json"),
+        ]
+    )
+
+    assert exit_code != 0
 
 
 def test_metadata_pulls_terraform_version_and_timestamp_from_plan(plan):
@@ -151,7 +242,15 @@ def test_end_to_end_writes_all_three_files_without_leaking_values(tmp_path):
     assert exit_code == 0
 
     summary = json.loads(summary_path.read_text())
-    assert summary["counts"] == {"add": 1, "change": 1, "destroy": 1, "replace": 1}
+    assert summary["counts"] == {
+        "add": 1,
+        "change": 1,
+        "destroy": 1,
+        "replace": 1,
+        "forget": 1,
+        "import": 1,
+        "move": 1,
+    }
 
     metadata = json.loads(metadata_path.read_text())
     assert metadata["head_sha"] == "head123"

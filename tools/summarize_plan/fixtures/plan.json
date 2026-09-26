@@ -92,6 +92,53 @@
         "before_sensitive": false,
         "after_sensitive": false
       }
+    },
+    {
+      "address": "aws_s3_bucket.forgotten",
+      "mode": "managed",
+      "type": "aws_s3_bucket",
+      "name": "forgotten",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["forget"],
+        "before": {"bucket": "forgotten-bucket"},
+        "after": null,
+        "after_unknown": {},
+        "before_sensitive": false,
+        "after_sensitive": false
+      }
+    },
+    {
+      "address": "aws_iam_role.imported",
+      "mode": "managed",
+      "type": "aws_iam_role",
+      "name": "imported",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["no-op"],
+        "before": {"name": "imported-role"},
+        "after": {"name": "imported-role"},
+        "after_unknown": {},
+        "before_sensitive": false,
+        "after_sensitive": false,
+        "importing": {"id": "imported-role"}
+      }
+    },
+    {
+      "address": "aws_iam_role.renamed",
+      "previous_address": "aws_iam_role.old_named",
+      "mode": "managed",
+      "type": "aws_iam_role",
+      "name": "renamed",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["no-op"],
+        "before": {"name": "renamed-role"},
+        "after": {"name": "renamed-role"},
+        "after_unknown": {},
+        "before_sensitive": false,
+        "after_sensitive": false
+      }
     }
   ]
 }
