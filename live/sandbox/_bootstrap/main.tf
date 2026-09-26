@@ -121,6 +121,25 @@ resource "aws_kms_alias" "storage" {
   target_key_id = aws_kms_key.storage.id
 }
 
+// Backs the "pemc-plan cannot read object contents in a sandbox bucket"
+// probe in plan.yaml - a dedicated bucket holding nothing but a known
+// canary key, so a denied GetObject can be told apart from a missing key
+// (which S3 returns as 404, not AccessDenied) without touching a bucket
+// that actually holds anything real.
+module "lp_canary" {
+  source = "../../../modules/aws/s3-bucket"
+
+  # lp = least-privilege
+  bucket_name = "woofle-pemc-lp-canary"
+  kms_key_arn = aws_kms_key.storage.arn
+}
+
+resource "aws_s3_object" "lp_canary" {
+  bucket  = module.lp_canary.bucket_id
+  key     = "canary.txt"
+  content = "least-privilege canary - do not delete"
+}
+
 // pemc-apply: assumed by CI when applying against the sandbox-apply
 // environment. Broader than pemc-plan (it has to actually create/change
 // infra), but the boundary below still keeps it away from IAM/org/SSO

@@ -125,8 +125,8 @@ jobs:
       # to seed it once via an admin profile.
       - name: pemc-plan cannot read object contents in a sandbox bucket
         run: |
-          out=$(aws s3api get-object --bucket woofle-pemc-sandbox-storage \
-            --key _least-privilege-canary.txt "$RUNNER_TEMP/canary-out" 2>&1) && rc=0 || rc=$?
+          out=$(aws s3api get-object --bucket woofle-pemc-lp-canary \
+            --key canary.txt "$RUNNER_TEMP/canary-out" 2>&1) && rc=0 || rc=$?
 
           if [ "$rc" -eq 0 ]; then
             echo "::error::pemc-plan s3:GetObject: expected to be denied, but the call succeeded"
@@ -134,7 +134,7 @@ jobs:
           fi
 
           if echo "$out" | grep -qiE "NoSuchKey|404"; then
-            echo "::error::pemc-plan s3:GetObject: s3://woofle-pemc-sandbox-storage/_least-privilege-canary.txt does not exist, so this probe is inconclusive (a missing key returns 404 rather than AccessDenied, since pemc-plan still has s3:ListBucket). Seed it once with an admin profile: printf 'least-privilege canary - do not delete' | aws s3 cp - s3://woofle-pemc-sandbox-storage/_least-privilege-canary.txt --sse aws:kms --sse-kms-key-id alias/woofle-pemc-s3"
+            echo "::error::pemc-plan s3:GetObject: s3://woofle-pemc-lp-canary/canary.txt does not exist, so this probe is inconclusive (a missing key returns 404 rather than AccessDenied, since pemc-plan still has s3:ListBucket). It should be created by live/sandbox/_bootstrap's aws_s3_object.lp_canary - apply that stack first."
             exit 1
           fi
 
