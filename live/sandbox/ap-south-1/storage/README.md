@@ -23,7 +23,6 @@ The CMK itself (`alias/woofle-pemc-s3`) is provisioned in [live/sandbox/_bootstr
 | ---- | ----------- |
 | <a name="output_bucket_arn"></a> [bucket\_arn](#output\_bucket\_arn) | n/a |
 | <a name="output_bucket_id"></a> [bucket\_id](#output\_bucket\_id) | n/a |
-| <a name="output_kms_key_arn"></a> [kms\_key\_arn](#output\_kms\_key\_arn) | n/a |
 
 ## Requirements
 
