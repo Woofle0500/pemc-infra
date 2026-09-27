@@ -54,7 +54,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "state_bucket_lifecycle" {
 resource "aws_kms_key" "management_cmk" {
   enable_key_rotation     = true
   deletion_window_in_days = 30
-  description             = "Shared CMK for the management account's S3 buckets (${var.state_bucket_name}, ${var.tf_run_bucket_name})"
+  description             = "CMK for the management account's Terraform state bucket (${var.state_bucket_name})"
   lifecycle {
     prevent_destroy = true
   }
@@ -63,6 +63,21 @@ resource "aws_kms_key" "management_cmk" {
 resource "aws_kms_alias" "management_cmk" {
   target_key_id = aws_kms_key.management_cmk.id
   name          = var.management_cmk_alias
+}
+
+// Dedicated to the tf run bucket, separate from the state bucket's CMK -
+// decrypt access to plan/apply run output must not double as decrypt
+// access to tfstate. Run objects are transient (see the lifecycle rule
+// below), so unlike management_cmk this key has no prevent_destroy.
+resource "aws_kms_key" "tf_run" {
+  enable_key_rotation     = true
+  deletion_window_in_days = 30
+  description             = "CMK for the management account's Terraform run bucket (${var.tf_run_bucket_name})"
+}
+
+resource "aws_kms_alias" "tf_run" {
+  target_key_id = aws_kms_key.tf_run.id
+  name          = var.tf_run_cmk_alias
 }
 
 
@@ -225,6 +240,16 @@ data "aws_iam_policy_document" "management_plan_permissions" {
     resources = [aws_kms_key.management_cmk.arn]
   }
 
+  // pemc-management-plan only writes run objects (WriteRunObjects below),
+  // it never reads them back - GenerateDataKey covers encrypting on
+  // PutObject, no kms:Decrypt needed here.
+  statement {
+    sid       = "GenerateRunObjectDataKey"
+    effect    = "Allow"
+    actions   = ["kms:GenerateDataKey"]
+    resources = [aws_kms_key.tf_run.arn]
+  }
+
   // The bootstrap stacks (this one and sandbox/_bootstrap) are applied
   // locally with SSO credentials and are never planned or applied in CI -
   // CI has no legitimate reason to touch their state.
@@ -319,6 +344,17 @@ data "aws_iam_policy_document" "management_apply_permissions" {
     actions   = ["s3:PutObject"]
     resources = ["${aws_s3_bucket.tf_run.arn}/plans/main/*"]
   }
+
+  // kms:GenerateDataKey on the tf run CMK is already granted via the
+  // inherited GenerateRunObjectDataKey statement - Decrypt is added here
+  // since apply, unlike plan, reads run objects back (ReadRunObjects
+  // above).
+  statement {
+    sid       = "DecryptRunObjects"
+    effect    = "Allow"
+    actions   = ["kms:Decrypt"]
+    resources = [aws_kms_key.tf_run.arn]
+  }
 }
 
 resource "aws_iam_role_policy" "management_apply_permissions" {
@@ -352,7 +388,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "tf_run" {
     bucket_key_enabled = true
     apply_server_side_encryption_by_default {
       sse_algorithm     = "aws:kms"
-      kms_master_key_id = aws_kms_key.management_cmk.arn
+      kms_master_key_id = aws_kms_key.tf_run.arn
     }
   }
 }
@@ -419,7 +455,7 @@ data "aws_iam_policy_document" "tf_run_bucket_policy" {
     condition {
       test     = "StringNotEquals"
       variable = "s3:x-amz-server-side-encryption-aws-kms-key-id"
-      values   = [aws_kms_key.management_cmk.arn]
+      values   = [aws_kms_key.tf_run.arn]
     }
     condition {
       test     = "Null"

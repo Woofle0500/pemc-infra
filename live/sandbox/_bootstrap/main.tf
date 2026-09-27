@@ -366,10 +366,11 @@ resource "aws_iam_role_policy_attachment" "pemc_apply_poweruser" {
   policy_arn = "arn:aws:iam::aws:policy/PowerUserAccess"
 }
 
-// IAM policy that only allows the root user of management account
-// to assume to corresponding IAM Role (OrganizationAccountAccessRole)
-// Used for break-glass access in case of identity center is misconfigured 
-// or isn't available.
+// IAM policy that only allows the management account's SSO admin role
+// (matched via management_sso_admin_role_arn_pattern) to assume the
+// corresponding IAM role (OrganizationAccountAccessRole). Used for
+// break-glass access in case identity center is misconfigured or isn't
+// available.
 data "aws_iam_policy_document" "org_account_access_trust" {
   statement {
     effect  = "Allow"

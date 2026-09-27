@@ -100,6 +100,18 @@ def test_comment_body_reports_plan_totals(plan, summary):
     )
 
 
+def test_comment_body_includes_plan_uri_when_given(plan, summary):
+    uri = "s3://woofle-pemc-tf-run/plans/pr-7/runs/123/1/live-sandbox/plan.txt"
+    body = sp.build_comment_body(plan, summary, plan_uri=uri)
+    assert f"Full plan: `{uri}`" in body
+    assert f"`aws s3 cp {uri} - --profile management`" in body
+
+
+def test_comment_body_omits_plan_uri_when_not_given(plan, summary):
+    body = sp.build_comment_body(plan, summary)
+    assert "Full plan:" not in body
+
+
 def test_forget_is_reported(summary):
     entry = next(
         c for c in summary["changes"] if c["address"] == "aws_s3_bucket.forgotten"

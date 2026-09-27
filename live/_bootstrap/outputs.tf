@@ -10,6 +10,14 @@ output "management_cmk_alias" {
   value = aws_kms_alias.management_cmk.name
 }
 
+output "tf_run_cmk_arn" {
+  value = aws_kms_key.tf_run.arn
+}
+
+output "tf_run_cmk_alias" {
+  value = aws_kms_alias.tf_run.name
+}
+
 output "management_plan_role_arn" {
   value = aws_iam_role.management_plan.arn
 }
