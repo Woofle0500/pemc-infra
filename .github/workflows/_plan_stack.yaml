@@ -25,6 +25,20 @@ jobs:
           slug=$(echo "${STACK#live/}" | tr '/' '-')
           echo "slug=$slug" >> "$GITHUB_OUTPUT"
 
+      # Computed once and reused by both the summarizer (to render the
+      # pointer in the PR comment) and the upload step below (to actually
+      # place the object there) - keeping them in one place so they
+      # donn't drift apart.
+      - name: Compute s3 run URI
+        id: run-uri
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          STACK_SLUG: ${{ steps.slug.outputs.slug }}
+        run: |
+          run_prefix="plans/pr-${PR_NUMBER}/runs/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/${STACK_SLUG}"
+          echo "run-prefix=$run_prefix" >> "$GITHUB_OUTPUT"
+          echo "plan-uri=s3://woofle-pemc-tf-run/${run_prefix}/plan.txt" >> "$GITHUB_OUTPUT"
+
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "1.15.9"
@@ -86,8 +100,8 @@ jobs:
           echo "STATE_SERIAL=$state_serial" >> "$GITHUB_ENV"
 
           echo "Building terraform plan..."
-          terraform plan -out=tfplan -input=false -lock=true > /dev/null
-          terraform show tfplan > plan.txt
+          terraform plan -out=tfplan -input=false -lock=true -lock-timeout=3m > /dev/null
+          terraform show -no-color tfplan > plan.txt
           terraform show -json tfplan > plan.json
 
       - name: Summarize plan
@@ -97,6 +111,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           MERGE_SHA: ${{ github.sha }}
           STACK_SLUG: ${{ steps.slug.outputs.slug }}
+          PLAN_URI: ${{ steps.run-uri.outputs.plan-uri }}
         run: |
           state_serial=$STATE_SERIAL
 
@@ -114,7 +129,8 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --run-id "$GITHUB_RUN_ID" \
             --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --state-serial "$state_serial"
+            --state-serial "$state_serial" \
+            --plan-uri "$PLAN_URI"
 
       # From here on we no longer need sandbox access - swap to the
       # management plan role to upload the run's artifacts.
@@ -133,17 +149,18 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           STACK_SLUG: ${{ steps.slug.outputs.slug }}
+          RUN_PREFIX: ${{ steps.run-uri.outputs.run-prefix }}
         run: |
-          run_prefix="plans/pr-${PR_NUMBER}/runs/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/${STACK_SLUG}"
+          run_prefix="$RUN_PREFIX"
           latest_prefix="plans/pr-${PR_NUMBER}/latest/${STACK_SLUG}"
 
           for f in plan.txt tfplan summary.json metadata.json; do
             aws s3 cp "$f" "s3://woofle-pemc-tf-run/${run_prefix}/${f}" \
-              --sse aws:kms --sse-kms-key-id alias/woofle-pemc-s3-shared
+              --sse aws:kms --sse-kms-key-id alias/woofle-pemc-tf-run
           done
 
           aws s3 cp summary.json "s3://woofle-pemc-tf-run/${latest_prefix}/summary.json" \
-            --sse aws:kms --sse-kms-key-id alias/woofle-pemc-s3-shared
+            --sse aws:kms --sse-kms-key-id alias/woofle-pemc-tf-run
 
       # The comment fragment stayys out of S3 and is handed to the
       # post-pr-comment job as a workflow artifact instead - it's assembled
