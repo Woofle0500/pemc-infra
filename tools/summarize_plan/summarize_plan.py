@@ -125,7 +125,9 @@ ACTION_LABELS = {
 }
 
 
-def build_comment_body(plan: dict[str, Any], summary: dict[str, Any]) -> str:
+def build_comment_body(
+    plan: dict[str, Any], summary: dict[str, Any], plan_uri: str | None = None
+) -> str:
     counts = summary["counts"]
     lines = [
         "### Terraform plan summary",
@@ -139,6 +141,10 @@ def build_comment_body(plan: dict[str, Any], summary: dict[str, Any]) -> str:
 
     if not summary["changes"]:
         lines.append("No resource changes.")
+        if plan_uri:
+            lines.append("")
+            lines.append(f"Full plan: `{plan_uri}`")
+            lines.append(f"`aws s3 cp {plan_uri} - --profile management`")
         return "\n".join(lines) + "\n"
 
     changes_by_address = {
@@ -161,6 +167,9 @@ def build_comment_body(plan: dict[str, Any], summary: dict[str, Any]) -> str:
         lines.append(f"| `{address}` | {label} | {attrs_text} |")
 
     lines.append("")
+    if plan_uri:
+        lines.append(f"Full plan: `{plan_uri}`")
+        lines.append(f"`aws s3 cp {plan_uri} - --profile management`")
     return "\n".join(lines) + "\n"
 
 
@@ -209,6 +218,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID"))
     parser.add_argument("--run-attempt", default=os.environ.get("GITHUB_RUN_ATTEMPT"))
     parser.add_argument("--state-serial", default=os.environ.get("STATE_SERIAL"))
+    parser.add_argument(
+        "--plan-uri",
+        default=os.environ.get("PLAN_URI"),
+        help="S3 URI of the uploaded plan.txt, rendered in the PR comment so reviewers know where to find the full plan",
+    )
     return parser.parse_args(argv)
 
 
@@ -221,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
     except UnhandledActionError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    comment_body = build_comment_body(plan, summary)
+    comment_body = build_comment_body(plan, summary, plan_uri=args.plan_uri)
     metadata = build_metadata(plan, args)
 
     write_json(args.summary_json, summary)
