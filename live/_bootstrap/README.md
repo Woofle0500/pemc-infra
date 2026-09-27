@@ -8,14 +8,17 @@ It also provisions the GitHub Actions OIDC provider and the two CI roles that ev
 
 Both roles are assumed via `sts:AssumeRoleWithWebIdentity` against the GitHub Actions OIDC provider (`aws_iam_openid_connect_provider.github_actions`) — no long-lived AWS credentials are stored in GitHub.
 
-- **`pemc-management-plan`** — assumable from any pull request in this repo (`token.actions.githubusercontent.com:sub = repo:.../pemc-infra@...:pull_request`). Read-only on state: `s3:ListBucket`/`s3:GetObject` on `live/*/terraform.tfstate`, lock-file management, and `kms:Decrypt`/`kms:GenerateDataKey` on the shared CMK. Also `s3:PutObject` on the run bucket (see below) — no extra KMS grant needed, `kms:GenerateDataKey` is already covered by the state permissions since it's the same key.
-- **`pemc-management-apply`** — assumable only from the `sandbox-apply` GitHub Actions environment. Everything `pemc-management-plan` has (including the run-bucket write, inherited via `source_policy_documents`, but kept explicit here too — see `WriteRunObjectsExplicit`), plus `s3:PutObject` on `live/*/terraform.tfstate`, and `s3:GetObject`/`s3:ListBucket` on the run bucket (to read back `summary.json` before applying, and to write its own apply output after). `max_session_duration` is 3 hours (default 1 hour is tight for a long apply).
+- **`pemc-management-plan`** — assumable from any pull request in this repo (`token.actions.githubusercontent.com:sub = repo:.../pemc-infra@...:pull_request`). Read-only on state: `s3:ListBucket`/`s3:GetObject` on `live/*/terraform.tfstate`, lock-file management, and `kms:Decrypt`/`kms:GenerateDataKey` on the state CMK. Also `s3:PutObject` on the run bucket (see below), with `kms:GenerateDataKey` (but not `kms:Decrypt`) on the separate run-bucket CMK — plan only writes run objects, it never reads them back.
+- **`pemc-management-apply`** — assumable only from the `sandbox-apply` GitHub Actions environment. Everything `pemc-management-plan` has (including the run-bucket write, inherited via `source_policy_documents`, but kept explicit here too — see `WriteRunObjectsExplicit`), plus `s3:PutObject` on `live/*/terraform.tfstate`, `s3:GetObject`/`s3:ListBucket` on the run bucket (to read back `summary.json` before applying, and to write its own apply output after), and `kms:Decrypt` on the run-bucket CMK to go with it. `max_session_duration` is 3 hours (default 1 hour is tight for a long apply).
 
 Both roles carry an explicit `DenyBootstrapStateAccess` statement blocking `s3:GetObject`/`s3:PutObject`/`s3:DeleteObject` on `live/_bootstrap/*` and `live/sandbox/_bootstrap/*` — CI never plans or applies either bootstrap stack, so it has no business touching their state files even though the `live/*/terraform.tfstate` glob would otherwise match them.
 
-## Shared CMK
+## KMS keys
 
-`aws_kms_key.management_cmk` / `aws_kms_alias.management_cmk` (`alias/woofle-pemc-s3-shared`) is the CMK used by both the state bucket and the run bucket below.
+The state bucket and the run bucket each have their own CMK, deliberately not shared: decrypt access to run output (plan.txt, tfplan) must not double as decrypt access to tfstate.
+
+- `aws_kms_key.management_cmk` / `aws_kms_alias.management_cmk` (`alias/woofle-pemc-tfstate`) encrypts the state bucket.
+- `aws_kms_key.tf_run` / `aws_kms_alias.tf_run` (`alias/woofle-pemc-tf-run`) encrypts the run bucket below. Unlike `management_cmk`, it has no `prevent_destroy` — run objects are transient and aren't relied on for recovery.
 
 ## Terraform run bucket
 
