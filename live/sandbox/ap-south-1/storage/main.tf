@@ -5,13 +5,13 @@ data "aws_kms_alias" "storage" {
   name = var.kms_key_alias
 }
 
-module "storage" {
-  source = "../../../../modules/aws/s3-bucket"
+# module "storage" {
+#   source = "../../../../modules/aws/s3-bucket"
 
-  bucket_name        = var.bucket_name
-  versioning_enabled = var.versioning_enabled
-  kms_key_arn        = data.aws_kms_alias.storage.target_key_arn
-}
+#   bucket_name        = var.bucket_name
+#   versioning_enabled = var.versioning_enabled
+#   kms_key_arn        = data.aws_kms_alias.storage.target_key_arn
+# }
 
 removed {
   from = module.storage
