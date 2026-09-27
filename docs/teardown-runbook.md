@@ -134,7 +134,27 @@ aws kms schedule-key-deletion --region ap-south-1 --key-id <key-id-or-arn> \
 ---
 
 ## 7. S3 bucket
-TODO
+
+**Cost:** storage + request pricing, varies by bucket. Buckets aren't emptied by `terraform destroy` — a non-empty bucket fails to delete, so it must be emptied first regardless of which bucket it is.
+
+```bash
+# Empty a bucket (all versions, since these buckets have versioning enabled)
+aws s3api list-object-versions --bucket <bucket-name> \
+  --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' --output json > /tmp/versions.json
+aws s3api delete-objects --bucket <bucket-name> --delete file:///tmp/versions.json
+
+aws s3api list-object-versions --bucket <bucket-name> \
+  --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json > /tmp/markers.json
+aws s3api delete-objects --bucket <bucket-name> --delete file:///tmp/markers.json
+
+# Then destroy via the owning stack, or delete directly if orphaned
+aws s3 rb "s3://<bucket-name>"
+```
+
+- **Storage bucket** (`woofle-pemc-sandbox-storage`, `live/sandbox/ap-south-1/storage`) — empty it before `terraform destroy`, using the steps above.
+- **Terraform run bucket** (`woofle-pemc-tf-run`, `live/_bootstrap`) — same as above. Only tear this down if every stack's CI pipeline is being decommissioned; it's central across all provisioned accounts, not per-account.
+- **Canary bucket** (`woofle-pemc-lp-canary`, `live/sandbox/_bootstrap`) — same as above. Only tear this down alongside the rest of `live/sandbox/_bootstrap` — [assert-least-privilege](verification/plan-least-privilege.md) depends on `canary.txt` existing in it, so removing it breaks CI for every other stack until the bootstrap stack is reapplied.
+- **State bucket** (`woofle-pemc-tfstate`) — not covered here. See [live/_bootstrap/README.md](../live/_bootstrap/README.md)'s "Never run `terraform destroy` here" and `prevent_destroy` sections instead; this is the state backend for every other stack in the repo and needs its own deliberate procedure.
 
 ---
 
