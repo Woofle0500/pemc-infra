@@ -187,6 +187,8 @@ def test_cli_exits_non_zero_for_unrecognized_action(tmp_path):
             str(tmp_path / "comment.md"),
             "--metadata-json",
             str(tmp_path / "metadata.json"),
+            "--state-serial",
+            "1",
         ]
     )
 
@@ -225,7 +227,7 @@ def test_metadata_pulls_terraform_version_and_timestamp_from_plan(plan):
         "run_id": "999",
         "run_attempt": "2",
         "terraform_version": "1.15.9",
-        "state_serial": "3",
+        "state_serial": 3,
         "timestamp": "2026-01-01T00:00:00Z",
     }
 
@@ -248,6 +250,8 @@ def test_end_to_end_writes_all_three_files_without_leaking_values(tmp_path):
             "head123",
             "--pr-number",
             "7",
+            "--state-serial",
+            "4",
         ]
     )
 

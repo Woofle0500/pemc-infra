@@ -1,19 +1,35 @@
-name: Plan stack
+name: Apply stack
+
 on:
   workflow_call:
     inputs:
       stack:
         type: string
         required: true
+      pr_number:
+        type: string
+        required: true
+    outputs:
+      plan_digest:
+        value: ${{ jobs.plan.outputs.plan_digest }}
+      plan_key:
+        value: ${{ jobs.plan.outputs.plan_key }}
+      has_changes:
+        value: ${{ jobs.plan.outputs.has_changes }}
 
 jobs:
   plan:
     name: Plan
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: sandbox-plan
     permissions:
       id-token: write
       contents: read
+    outputs:
+      plan_digest: ${{ steps.digest-key.outputs.plan_digest }}
+      plan_key: ${{ steps.digest-key.outputs.plan_key }}
+      has_changes: ${{ steps.has-changes.outputs.has_changes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -25,29 +41,11 @@ jobs:
           slug=$(echo "${STACK#live/}" | tr '/' '-')
           echo "slug=$slug" >> "$GITHUB_OUTPUT"
 
-      # Computed once and reused by both the summarizer (to render the
-      # pointer in the PR comment) and the upload step below (to actually
-      # place the object there) - keeping them in one place so they
-      # donn't drift apart.
-      - name: Compute s3 run URI
-        id: run-uri
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          STACK_SLUG: ${{ steps.slug.outputs.slug }}
-        run: |
-          run_prefix="plans/pr-${PR_NUMBER}/runs/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/${STACK_SLUG}"
-          echo "run-prefix=$run_prefix" >> "$GITHUB_OUTPUT"
-          echo "plan-uri=s3://woofle-pemc-tf-run/${run_prefix}/plan.txt" >> "$GITHUB_OUTPUT"
-
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "1.15.9"
           terraform_wrapper: false
 
-      # Sandbox credentials: used by the AWS provider to read/plan the
-      # actual workload resources this stack manages. Read-only by design
-      # (see live/sandbox/_bootstrap/main.tf) - this role never modifies
-      # state.
       - name: Configure AWS credentials (sandbox pemc-plan)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
@@ -68,10 +66,7 @@ jobs:
           echo "token-file=$token_file" >> "$GITHUB_OUTPUT"
 
       # assume_role_with_web_identity is an object-typed backend attribute,
-      # not a flat key - `-backend-config="role_arn=..."` can't set it, so
-      # we hand Terraform a partial backend config file instead (still the
-      # `-backend-config` flag, just pointed at a file rather than a
-      # key=value pair).
+      # not a flat key.
       - name: Write backend config for the management state role
         id: backend-config
         env:
@@ -92,7 +87,7 @@ jobs:
           BACKEND_CONFIG: ${{ steps.backend-config.outputs.file }}
         run: |
           terraform init -backend-config="$BACKEND_CONFIG" -input=false > /dev/null
-          
+
           echo "Pulling terraform state serial..."
           raw_state=$(terraform state pull)
           if [ -z "$raw_state" ]; then state_serial=0; else state_serial=$(jq -r '.serial' <<<"$raw_state"); fi
@@ -101,24 +96,27 @@ jobs:
 
           echo "Building terraform plan..."
           terraform plan -out=tfplan -input=false -lock=true -lock-timeout=3m > /dev/null
+
+      - name: Terraform show
+        working-directory: ${{ inputs.stack }}
+        run: |
           terraform show -no-color tfplan > plan.txt
           terraform show -json tfplan > plan.json
 
       - name: Summarize plan
         working-directory: ${{ inputs.stack }}
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          HEAD_SHA: ${{ github.sha }}
           MERGE_SHA: ${{ github.sha }}
           STACK_SLUG: ${{ steps.slug.outputs.slug }}
-          PLAN_URI: ${{ steps.run-uri.outputs.plan-uri }}
+          PLAN_URI: s3://woofle-pemc-tf-run/plans/main/${{ github.sha }}/${{ github.run_id }}/${{ github.run_attempt }}/${{ steps.slug.outputs.slug }}/plan.txt
         run: |
           state_serial=$STATE_SERIAL
 
           # comment.md is named with the stack slug baked in, not left
-          # generic - post-pr-comment downloads every stack's artifact
-          # with merge-multiple:true (flat, single directory), so a
-          # generic name would collide across stacks.
+          # generic - it's written into $GITHUB_STEP_SUMMARY below, so a
+          # generic name would collide if this ever fans out further.
           python3 "$GITHUB_WORKSPACE/tools/summarize_plan/summarize_plan.py" \
             plan.json \
             --summary-json summary.json \
@@ -132,46 +130,77 @@ jobs:
             --state-serial "$state_serial" \
             --plan-uri "$PLAN_URI"
 
+      # Real policy evaluation (OPA/Conftest) lands here later.
+      - name: Policy gate (placeholder)
+        run: |
+          echo "Policy gate: not yet implemented"
+          exit 0
+
       # From here on we no longer need sandbox access - swap to the
-      # management plan role to upload the run's artifacts.
+      # management plan role for the S3 steps that follow (divergence
+      # check download, then the artifact upload).
       - name: Configure AWS credentials (management pemc-management-plan)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: arn:aws:iam::730335219774:role/pemc-management-plan
           aws-region: ap-south-1
 
-      # Everything except the PR comment fragment goes to the run bucket.
-      # `latest/` is overwritten every run so downstream tooling (and the
-      # apply workflow) always has a cheap way to read the current summary
-      # for a stack without needing the run id.
+      # Confirms the plan about to be applied still matches what a
+      # reviewer actually approved on the PR. Neither failure mode here
+      # blocks the job - a missing/expired reviewed plan or a genuine
+      # divergence is a signal for whoever approves the apply, not a
+      # reason to fail the pipeline outright.
+      - name: Divergence check
+        working-directory: ${{ inputs.stack }}
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          STACK_SLUG: ${{ steps.slug.outputs.slug }}
+        run: |
+          reviewed_uri="s3://woofle-pemc-tf-run/plans/pr-${PR_NUMBER}/latest/${STACK_SLUG}/summary.json"
+          reviewed_file="$RUNNER_TEMP/reviewed-summary.json"
+
+          if ! aws s3 cp "$reviewed_uri" "$reviewed_file"; then
+            echo "::warning::No reviewed plan found for ${STACK_SLUG} at ${reviewed_uri} - it is missing or expired. Review this plan before approving the apply."
+            exit 0
+          fi
+
+          if ! python3 "$GITHUB_WORKSPACE/tools/compare_summaries/compare_summaries.py" \
+              --reviewed "$reviewed_file" --current summary.json; then
+            echo "::warning::Plan for ${STACK_SLUG} diverges from the plan reviewed on PR #${PR_NUMBER} - review this plan before approving the apply."
+          fi
+
+      - name: Compute plan digest and key
+        id: digest-key
+        working-directory: ${{ inputs.stack }}
+        env:
+          STACK_SLUG: ${{ steps.slug.outputs.slug }}
+        run: |
+          key="plans/main/${GITHUB_SHA}/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/${STACK_SLUG}"
+          echo "plan_key=$key" >> "$GITHUB_OUTPUT"
+          echo "plan_digest=$(sha256sum tfplan | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
       - name: Upload plan artifacts to the Terraform run bucket
         working-directory: ${{ inputs.stack }}
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          STACK_SLUG: ${{ steps.slug.outputs.slug }}
-          RUN_PREFIX: ${{ steps.run-uri.outputs.run-prefix }}
+          KEY: ${{ steps.digest-key.outputs.plan_key }}
         run: |
-          run_prefix="$RUN_PREFIX"
-          latest_prefix="plans/pr-${PR_NUMBER}/latest/${STACK_SLUG}"
-
           for f in plan.txt tfplan summary.json metadata.json; do
-            aws s3 cp "$f" "s3://woofle-pemc-tf-run/${run_prefix}/${f}" \
+            aws s3 cp "$f" "s3://woofle-pemc-tf-run/${KEY}/${f}" \
               --sse aws:kms --sse-kms-key-id alias/woofle-pemc-tf-run
           done
 
-          aws s3 cp summary.json "s3://woofle-pemc-tf-run/${latest_prefix}/summary.json" \
-            --sse aws:kms --sse-kms-key-id alias/woofle-pemc-tf-run
+      # Used to determine whether to ask someone for approval an apply
+      # in case it changes nothing.
+      - name: Determine whether the plan has changes
+        id: has-changes
+        working-directory: ${{ inputs.stack }}
+        run: |
+          has_changes=$(jq '[.counts[]] | add > 0' summary.json)
+          echo "has_changes=$has_changes" >> "$GITHUB_OUTPUT"
 
-      # The comment fragment stayys out of S3 and is handed to the
-      # post-pr-comment job as a workflow artifact instead - it's assembled
-      # into one PR comment across all stacks, which S3 has no part in.
-      # overwrite:true so a re-run of this job doesn't 409 against the
-      # previous attempt's artifact of the same stack - v4 artifacts are
-      # immutable and scoped to the run, not the attempt, by default.
-      - name: Upload PR comment fragment
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: plan-comment-${{ steps.slug.outputs.slug }}
-          path: ${{ inputs.stack }}/comment-${{ steps.slug.outputs.slug }}.md
-          retention-days: 1
-          overwrite: true
+      - name: Write plan summary to job summary
+        working-directory: ${{ inputs.stack }}
+        env:
+          STACK_SLUG: ${{ steps.slug.outputs.slug }}
+        run: |
+          cat "comment-${STACK_SLUG}.md" >> "$GITHUB_STEP_SUMMARY"

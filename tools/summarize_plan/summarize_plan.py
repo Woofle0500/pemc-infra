@@ -217,7 +217,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--pr-number", default=os.environ.get("PR_NUMBER"))
     parser.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID"))
     parser.add_argument("--run-attempt", default=os.environ.get("GITHUB_RUN_ATTEMPT"))
-    parser.add_argument("--state-serial", default=os.environ.get("STATE_SERIAL"))
+    parser.add_argument("--state-serial", required=True, type=int)
     parser.add_argument(
         "--plan-uri",
         default=os.environ.get("PLAN_URI"),
