@@ -165,9 +165,13 @@ jobs:
       # The comment fragment stayys out of S3 and is handed to the
       # post-pr-comment job as a workflow artifact instead - it's assembled
       # into one PR comment across all stacks, which S3 has no part in.
+      # overwrite:true so a re-run of this job doesn't 409 against the
+      # previous attempt's artifact of the same stack - v4 artifacts are
+      # immutable and scoped to the run, not the attempt, by default.
       - name: Upload PR comment fragment
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: plan-comment-${{ steps.slug.outputs.slug }}
           path: ${{ inputs.stack }}/comment-${{ steps.slug.outputs.slug }}.md
           retention-days: 1
+          overwrite: true
