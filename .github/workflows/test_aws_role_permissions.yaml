@@ -32,7 +32,9 @@ jobs:
 
       - run: aws s3 ls s3://woofle-pemc-tf-run/plans/ # should succeed.
     
-      - run: aws s3 ls s3://woofle-pemc-tf-run/ # should deny, since the permission
+      - run: |
+          echo "should deny"
+          aws s3 ls s3://woofle-pemc-tf-run/ # should deny, since the permission
   
   test-apply-role:
     runs-on: ubuntu-latest
