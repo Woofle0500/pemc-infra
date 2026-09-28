@@ -1,0 +1,61 @@
+name: Test AWS Role Permissions
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+
+jobs:
+  test-plan-role:
+    runs-on: ubuntu-latest
+    environment: sandbox-plan
+    steps:
+      - name: Configure AWS credentials (sandbox pemc-plan)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::782747473473:role/pemc-plan
+          aws-region: ap-south-1
+
+      - run: aws sts get-caller-identity
+
+  test-management-plan-role:
+    runs-on: ubuntu-latest
+    environment: sandbox-plan
+    steps:
+      - name: Configure AWS credentials (pemc-management-plan)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::730335219774:role/pemc-management-plan
+          aws-region: ap-south-1
+
+      - run: aws sts get-caller-identity
+
+      - run: aws s3 ls s3://woofle-pemc-tf-run/plans/ # should succeed.
+    
+      - run: aws s3 ls s3://woofle-pemc-tf-run/ # should deny, since the permission
+  
+  test-apply-role:
+    runs-on: ubuntu-latest
+    environment: sandbox-plan
+    steps:
+       # Should succeed.
+      - name: Configure AWS credentials (sandbox pemc-apply)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::782747473473:role/pemc-apply
+          aws-region: ap-south-1
+      
+      - run: aws sts get-caller-identity
+
+  test-management-apply-role:
+    runs-on: ubuntu-latest
+    environment: sandbox-plan
+    steps:
+      # Should succeed.
+      - name: Configure AWS credentials (pemc-management-apply)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::730335219774:role/pemc-management-apply
+          aws-region: ap-south-1
+      
+      - run: aws sts get-caller-identity
