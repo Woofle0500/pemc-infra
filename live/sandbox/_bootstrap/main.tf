@@ -24,7 +24,10 @@ data "aws_iam_policy_document" "pemc_plan_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:Woofle0500@65225019/pemc-infra@1363157651:pull_request"]
+      values = [
+        "repo:Woofle0500@65225019/pemc-infra@1363157651:pull_request",
+        "repo:Woofle0500@65225019/pemc-infra@1363157651:environment:sandbox-plan"
+      ]
     }
   }
 }
