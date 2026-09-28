@@ -1,0 +1,84 @@
+name: Apply
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: apply-${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  resolve-pr:
+    name: Resolve PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      pr_number: ${{ steps.lookup.outputs.pr_number }}
+    steps:
+      # Unauthenticated requests are capped at 60/hr, which this workflow
+      # can burn through easily - GH_TOKEN makes gh api authenticate as
+      # the job's GITHUB_TOKEN instead.
+      - name: Look up the PR that merged this commit
+        id: lookup
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pr_number=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+            --jq '.[0].number')
+
+          if [ -z "$pr_number" ] || [ "$pr_number" = "null" ]; then
+            echo "::error::No pull request found for commit ${GITHUB_SHA}."
+            exit 1
+          fi
+
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+
+  discover-stacks:
+    name: Discover stacks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      stacks: ${{ steps.find.outputs.stacks }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Exclude any directory named `_bootstrap`, at any depth (the
+      # root state-bucket bootstrap and every per-account bootstrap
+      # alike) - CI never plans or applies a bootstrap stack, see
+      # live/_bootstrap/README.md and the DenyBootstrapStateAccess
+      # statement on the management plan role.
+      - name: Find stack directories
+        id: find
+        run: |
+          stacks=$(find live -type d -name '_bootstrap' -prune -o -type f -name '*.tf' -exec dirname {} \; \
+            | sort -u | jq -R -s -c 'split("\n")[:-1]')
+
+          if [ "$stacks" = "[]" ]; then
+            echo "::error::No Terraform stacks found under live/ (excluding _bootstrap directories)."
+            exit 1
+          fi
+
+          echo "stacks=$stacks" >> "$GITHUB_OUTPUT"
+
+  stack:
+    name: Apply (${{ matrix.stack }})
+    needs: [resolve-pr, discover-stacks]
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: ${{ fromJSON(needs.discover-stacks.outputs.stacks) }}
+    uses: ./.github/workflows/_apply_stack.yaml
+    with:
+      stack: ${{ matrix.stack }}
+      pr_number: ${{ needs.resolve-pr.outputs.pr_number }}
+    permissions:
+      id-token: write
+      contents: read
