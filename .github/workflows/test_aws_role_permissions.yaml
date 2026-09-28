@@ -32,11 +32,13 @@ jobs:
 
       - run: aws s3 ls s3://woofle-pemc-tf-run/plans/ # should succeed.
     
-      - run: aws s3 ls s3://woofle-pemc-tf-run/ # should deny, since the permission
+      - run: |
+          echo "should deny"
+          aws s3 ls s3://woofle-pemc-tf-run/ # should deny, since the permission
   
   test-apply-role:
     runs-on: ubuntu-latest
-    environment: sandbox-plan
+    environment: sandbox-apply
     steps:
        # Should succeed.
       - name: Configure AWS credentials (sandbox pemc-apply)
@@ -49,7 +51,7 @@ jobs:
 
   test-management-apply-role:
     runs-on: ubuntu-latest
-    environment: sandbox-plan
+    environment: sandbox-apply
     steps:
       # Should succeed.
       - name: Configure AWS credentials (pemc-management-apply)
