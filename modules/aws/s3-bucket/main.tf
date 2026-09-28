@@ -1,5 +1,8 @@
 resource "aws_s3_bucket" "this" {
   bucket = var.bucket_name
+  tags = {
+    "pemc:test" = "apply-workflow-plan-job"
+  }
 }
 
 resource "aws_s3_bucket_versioning" "this" {
