@@ -65,20 +65,27 @@ jobs:
             | jq -r '.value' > "$token_file"
           echo "token-file=$token_file" >> "$GITHUB_OUTPUT"
 
-      # assume_role_with_web_identity is an object-typed backend attribute,
-      # not a flat key.
+      # The saved plan embeds the backend config, and apply replays it,
+      # so the backend config only names a profile (pemc-state). The
+      # profile itself, and the role it assumes, is defined per job in
+      # an AWS config file.
       - name: Write backend config for the management state role
         id: backend-config
         env:
           TOKEN_FILE: ${{ steps.oidc-token.outputs.token-file }}
         run: |
           backend_config_file="$RUNNER_TEMP/backend.hcl"
-          cat > "$backend_config_file" <<EOF
-          assume_role_with_web_identity = {
-            role_arn = "arn:aws:iam::730335219774:role/pemc-management-plan"
-            web_identity_token_file = "$TOKEN_FILE"
-          }
+          aws_config_file="$RUNNER_TEMP/aws-config"
+          cat > "$aws_config_file" <<EOF
+          [profile pemc-state]
+          role_arn = arn:aws:iam::730335219774:role/pemc-management-plan
+          web_identity_token_file = $TOKEN_FILE
+          region = ap-south-1
           EOF
+          cat > "$backend_config_file" <<EOF
+          profile = "pemc-state"
+          EOF
+          echo "AWS_CONFIG_FILE=$aws_config_file" >> "$GITHUB_ENV"
           echo "file=$backend_config_file" >> "$GITHUB_OUTPUT"
 
       - name: Terraform init / plan
@@ -287,18 +294,26 @@ jobs:
             | jq -r '.value' > "$token_file"
           echo "token-file=$token_file" >> "$GITHUB_OUTPUT"
 
+      # The saved plan embeds the backend config it was planned with, and
+      # `terraform apply tfplan` replays that. So the backend config only
+      # names a profile.
       - name: Write backend config for the management state role
         id: backend-config
         env:
           TOKEN_FILE: ${{ steps.oidc-token.outputs.token-file }}
         run: |
           backend_config_file="$RUNNER_TEMP/backend.hcl"
-          cat > "$backend_config_file" <<BACKEND
-          assume_role_with_web_identity = {
-            role_arn = "arn:aws:iam::730335219774:role/pemc-management-apply"
-            web_identity_token_file = "$TOKEN_FILE"
-          }
+          aws_config_file="$RUNNER_TEMP/aws-config"
+          cat > "$aws_config_file" <<BACKEND
+          [profile pemc-state]
+          role_arn = arn:aws:iam::730335219774:role/pemc-management-apply
+          web_identity_token_file = $TOKEN_FILE
+          region = ap-south-1
           BACKEND
+          cat > "$backend_config_file" <<BACKEND
+          profile = "pemc-state"
+          BACKEND
+          echo "AWS_CONFIG_FILE=$aws_config_file" >> "$GITHUB_ENV"
           echo "file=$backend_config_file" >> "$GITHUB_OUTPUT"
 
       - name: Terraform init
