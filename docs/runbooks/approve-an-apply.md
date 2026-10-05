@@ -20,15 +20,18 @@ Open the run's summary. Per stack, the plan job writes:
 | `Divergence check: ❌ FAILED` | The plan differs from what was reviewed; the diff is listed | Read the diff, fetch the full plan, approve only if the difference is explained |
 | `Divergence check: ⚠️ UNVERIFIED` | No reviewed plan found (missing or expired) | Treat as unreviewed: fetch the full plan and read all of it |
 
-The summary is public, so it only gives the plan's S3 location, never its contents.
+The summary is public, so it only gives the plan's S3 location and its `plan.txt` sha256, never its contents.
 
 ## Fetching plan.txt
 
-Copy the command from the `Terraform plan` section of the summary:
+Save the file, and compare its digest against the `plan.txt sha256` line in the summary before reading it:
 
 ```bash
-aws s3 cp s3://woofle-pemc-tf-run/plans/main/<sha>/<run-id>/<run-attempt>/<stack-slug>/plan.txt - --profile management
+aws s3 cp s3://woofle-pemc-tf-run/plans/main/<sha>/<run-id>/<run-attempt>/<stack-slug>/plan.txt plan.txt --profile management
+sha256sum plan.txt
 ```
+
+If the digest does not match the summary, do not read or trust the file, and reject the apply.
 
 Permissions are the same as in [review-a-plan.md](review-a-plan.md).
 

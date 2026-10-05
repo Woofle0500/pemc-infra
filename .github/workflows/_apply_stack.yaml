@@ -241,17 +241,17 @@ jobs:
           has_changes=$(jq '[.counts[]] | add > 0' summary.json)
           echo "has_changes=$has_changes" >> "$GITHUB_OUTPUT"
 
-      # The job summary is publicly visible, so it only points at the plan
-      # in S3 rather than containing it.
-      - name: Write plan location to job summary
+      # The plan.txt digest lets the approver verify the file
+      # they fetch from S3.
+      - name: Write plan comment to job summary
+        working-directory: ${{ inputs.stack }}
         env:
-          KEY: ${{ steps.digest-key.outputs.plan_key }}
+          STACK_SLUG: ${{ steps.slug.outputs.slug }}
         run: |
+          cat "comment-${STACK_SLUG}.md" >> "$GITHUB_STEP_SUMMARY"
           {
-            echo "### Terraform plan"
             echo
-            echo "Full plan: \`s3://woofle-pemc-tf-run/${KEY}/plan.txt\`"
-            echo "\`aws s3 cp s3://woofle-pemc-tf-run/${KEY}/plan.txt - --profile management\`"
+            echo "plan.txt sha256: \`$(sha256sum plan.txt | cut -d' ' -f1)\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   apply:
