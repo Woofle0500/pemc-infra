@@ -177,6 +177,17 @@ jobs:
           # it too (same ManageLockFiles statement).
           aws s3 rm "s3://woofle-pemc-tfstate/${canary_prefix}/terraform.tfstate.tflock"
 
+      # The apply workflow's divergence check treats a 404 on the reviewed
+      # summary as "unverified" and anything else as a hard error. That only
+      # works if a missing key really returns 404 (not 403) under the
+      # s3:prefix-scoped ListBucket condition, so assert it here.
+      - name: Missing reviewed-summary key returns 404, not 403
+        run: |
+          source "$RUNNER_TEMP/lp-assert.sh"
+          assert_denied "head-object on a missing reviewed summary" '\(404\)|Not Found' \
+            aws s3api head-object --bucket woofle-pemc-tf-run \
+              --key plans/pr-0/latest/none/summary.json
+
   plan:
     name: Plan (${{ matrix.stack }})
     needs: [discover-stacks, assert-least-privilege]

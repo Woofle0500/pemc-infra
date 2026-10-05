@@ -168,7 +168,14 @@ jobs:
           reviewed_file="$RUNNER_TEMP/reviewed-summary.json"
           diff_file="$RUNNER_TEMP/divergence.txt"
 
-          if ! aws s3 cp "$reviewed_uri" "$reviewed_file"; then
+          if ! out=$(aws s3 cp "$reviewed_uri" "$reviewed_file" 2>&1); then
+            # Only a missing key means "unverified". Anything else
+            # (e.g. 403, throttling, network) is an error, not a missing plan.
+            if ! echo "$out" | grep -qE '\(404\)|NoSuchKey|does not exist'; then
+              echo "::error::Could not read the reviewed summary."
+              echo "$out"
+              exit 1
+            fi
             echo "::warning::No reviewed plan found for ${STACK_SLUG} at ${reviewed_uri} - it is missing or expired. Review this plan before approving the apply."
             echo "status=unverified" >> "$GITHUB_OUTPUT"
             {
