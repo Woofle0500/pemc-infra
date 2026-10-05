@@ -29,7 +29,7 @@ jobs:
     outputs:
       plan_digest: ${{ steps.digest-key.outputs.plan_digest }}
       plan_key: ${{ steps.digest-key.outputs.plan_key }}
-      has_changes: ${{ steps.has-changes.outputs.has_changes }}
+      has_changes: ${{ steps.plan.outputs.has_changes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -89,6 +89,7 @@ jobs:
           echo "file=$backend_config_file" >> "$GITHUB_OUTPUT"
 
       - name: Terraform init / plan
+        id: plan
         working-directory: ${{ inputs.stack }}
         env:
           BACKEND_CONFIG: ${{ steps.backend-config.outputs.file }}
@@ -102,7 +103,20 @@ jobs:
           echo "STATE_SERIAL=$state_serial" >> "$GITHUB_ENV"
 
           echo "Building terraform plan..."
-          terraform plan -out=tfplan -input=false -lock=true -lock-timeout=3m > /dev/null
+          # -detailed-exitcode: 0 = no changes, 2 = changes, 1 = error.
+          set +e
+          terraform plan -detailed-exitcode -out=tfplan -input=false -lock=true -lock-timeout=3m > /dev/null
+          rc=$?
+          set -e
+
+          case "$rc" in
+            0) echo "has_changes=false" >> "$GITHUB_OUTPUT" ;;
+            2) echo "has_changes=true" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error::terraform plan failed with exit code $rc."
+              exit 1
+              ;;
+          esac
 
       - name: Terraform show
         working-directory: ${{ inputs.stack }}
@@ -231,15 +245,6 @@ jobs:
             aws s3 cp "$f" "s3://woofle-pemc-tf-run/${KEY}/${f}" \
               --sse aws:kms --sse-kms-key-id alias/woofle-pemc-tf-run
           done
-
-      # Used to determine whether to ask someone for approval an apply
-      # in case it changes nothing.
-      - name: Determine whether the plan has changes
-        id: has-changes
-        working-directory: ${{ inputs.stack }}
-        run: |
-          has_changes=$(jq '[.counts[]] | add > 0' summary.json)
-          echo "has_changes=$has_changes" >> "$GITHUB_OUTPUT"
 
       # The plan.txt digest lets the approver verify the file
       # they fetch from S3.
