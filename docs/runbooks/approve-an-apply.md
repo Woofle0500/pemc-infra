@@ -40,3 +40,4 @@ Permissions are the same as in [review-a-plan.md](review-a-plan.md).
 In the UI: **Review deployments** on the run page.
 
 Rejecting fails the apply job. Nothing is applied and AWS is untouched; the merged code stays on main, so fix forward or revert.
+If a run has waited more than a few hours, use "Re-run all jobs" instead of approving. The saved plan is checked against the state serial, not against changes made in AWS since - meaning that the world may have changed due to manual changes for instance.

@@ -27,8 +27,8 @@ jobs:
       id-token: write
       contents: read
     outputs:
-      plan_digest: ${{ steps.digest-key.outputs.plan_digest }}
-      plan_key: ${{ steps.digest-key.outputs.plan_key }}
+      plan_digest: ${{ steps.digest.outputs.plan_digest }}
+      plan_key: ${{ steps.plan-key.outputs.plan_key }}
       has_changes: ${{ steps.plan.outputs.has_changes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -124,6 +124,16 @@ jobs:
           terraform show -no-color tfplan > plan.txt
           terraform show -json tfplan > plan.json
 
+      # Where this run's plan artifacts live in the run bucket. Computed
+      # once and used by the summary, the upload and the apply job.
+      - name: Compute plan key
+        id: plan-key
+        env:
+          STACK_SLUG: ${{ steps.slug.outputs.slug }}
+        run: |
+          key="plans/main/${GITHUB_SHA}/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/${STACK_SLUG}"
+          echo "plan_key=$key" >> "$GITHUB_OUTPUT"
+
       - name: Summarize plan
         working-directory: ${{ inputs.stack }}
         env:
@@ -131,7 +141,7 @@ jobs:
           HEAD_SHA: ${{ github.sha }}
           MERGE_SHA: ${{ github.sha }}
           STACK_SLUG: ${{ steps.slug.outputs.slug }}
-          PLAN_URI: s3://woofle-pemc-tf-run/plans/main/${{ github.sha }}/${{ github.run_id }}/${{ github.run_attempt }}/${{ steps.slug.outputs.slug }}/plan.txt
+          PLAN_URI: s3://woofle-pemc-tf-run/${{ steps.plan-key.outputs.plan_key }}/plan.txt
         run: |
           state_serial=$STATE_SERIAL
 
@@ -226,20 +236,15 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Compute plan digest and key
-        id: digest-key
+      - name: Compute plan digest
+        id: digest
         working-directory: ${{ inputs.stack }}
-        env:
-          STACK_SLUG: ${{ steps.slug.outputs.slug }}
-        run: |
-          key="plans/main/${GITHUB_SHA}/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/${STACK_SLUG}"
-          echo "plan_key=$key" >> "$GITHUB_OUTPUT"
-          echo "plan_digest=$(sha256sum tfplan | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        run: echo "plan_digest=$(sha256sum tfplan | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload plan artifacts to the Terraform run bucket
         working-directory: ${{ inputs.stack }}
         env:
-          KEY: ${{ steps.digest-key.outputs.plan_key }}
+          KEY: ${{ steps.plan-key.outputs.plan_key }}
         run: |
           for f in plan.txt tfplan summary.json metadata.json; do
             aws s3 cp "$f" "s3://woofle-pemc-tf-run/${KEY}/${f}" \
@@ -451,6 +456,7 @@ jobs:
           aws-region: ap-south-1
 
       - name: Upload apply output
+        id: upload-apply-output
         if: always() && steps.apply-output.outputs.present == 'true'
         working-directory: ${{ inputs.stack }}
         env:
@@ -459,7 +465,10 @@ jobs:
           aws s3 cp apply.txt "s3://woofle-pemc-tf-run/${PLAN_KEY}/apply.txt" \
             --sse aws:kms --sse-kms-key-id alias/woofle-pemc-tf-run
 
+      # Runs even when apply failed, as long as the output was uploaded,
+      # so the summary still points at apply.txt.
       - name: Write apply result to job summary
+        if: always() && steps.upload-apply-output.outcome == 'success'
         env:
           CONVERGED: ${{ steps.converge.outputs.converged }}
           PLAN_KEY: ${{ needs.plan.outputs.plan_key }}
