@@ -372,23 +372,6 @@ data "aws_iam_policy_document" "management_apply_permissions" {
     actions   = ["s3:GetObject"]
     resources = ["${aws_s3_bucket.tf_run.arn}/*"]
   }
-  statement {
-    sid       = "WriteRunObjectsExplicit"
-    effect    = "Allow"
-    actions   = ["s3:PutObject"]
-    resources = ["${aws_s3_bucket.tf_run.arn}/plans/main/*"]
-  }
-
-  // kms:GenerateDataKey on the tf run CMK is already granted via the
-  // inherited GenerateRunObjectDataKey statement - Decrypt is added here
-  // since apply, unlike plan, reads run objects back (ReadRunObjects
-  // above).
-  statement {
-    sid       = "DecryptRunObjects"
-    effect    = "Allow"
-    actions   = ["kms:Decrypt"]
-    resources = [aws_kms_key.tf_run.arn]
-  }
 }
 
 resource "aws_iam_role_policy" "management_apply_permissions" {

@@ -27,9 +27,9 @@ jobs:
       id-token: write
       contents: read
     outputs:
-      plan_digest: ${{ steps.digest-key.outputs.plan_digest }}
-      plan_key: ${{ steps.digest-key.outputs.plan_key }}
-      has_changes: ${{ steps.has-changes.outputs.has_changes }}
+      plan_digest: ${{ steps.digest.outputs.plan_digest }}
+      plan_key: ${{ steps.plan-key.outputs.plan_key }}
+      has_changes: ${{ steps.plan.outputs.has_changes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -89,6 +89,7 @@ jobs:
           echo "file=$backend_config_file" >> "$GITHUB_OUTPUT"
 
       - name: Terraform init / plan
+        id: plan
         working-directory: ${{ inputs.stack }}
         env:
           BACKEND_CONFIG: ${{ steps.backend-config.outputs.file }}
@@ -102,13 +103,36 @@ jobs:
           echo "STATE_SERIAL=$state_serial" >> "$GITHUB_ENV"
 
           echo "Building terraform plan..."
-          terraform plan -out=tfplan -input=false -lock=true -lock-timeout=3m > /dev/null
+          # -detailed-exitcode: 0 = no changes, 2 = changes, 1 = error.
+          set +e
+          terraform plan -detailed-exitcode -out=tfplan -input=false -lock=true -lock-timeout=3m > /dev/null
+          rc=$?
+          set -e
+
+          case "$rc" in
+            0) echo "has_changes=false" >> "$GITHUB_OUTPUT" ;;
+            2) echo "has_changes=true" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error::terraform plan failed with exit code $rc."
+              exit 1
+              ;;
+          esac
 
       - name: Terraform show
         working-directory: ${{ inputs.stack }}
         run: |
           terraform show -no-color tfplan > plan.txt
           terraform show -json tfplan > plan.json
+
+      # Where this run's plan artifacts live in the run bucket. Computed
+      # once and used by the summary, the upload and the apply job.
+      - name: Compute plan key
+        id: plan-key
+        env:
+          STACK_SLUG: ${{ steps.slug.outputs.slug }}
+        run: |
+          key="plans/main/${GITHUB_SHA}/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/${STACK_SLUG}"
+          echo "plan_key=$key" >> "$GITHUB_OUTPUT"
 
       - name: Summarize plan
         working-directory: ${{ inputs.stack }}
@@ -117,7 +141,7 @@ jobs:
           HEAD_SHA: ${{ github.sha }}
           MERGE_SHA: ${{ github.sha }}
           STACK_SLUG: ${{ steps.slug.outputs.slug }}
-          PLAN_URI: s3://woofle-pemc-tf-run/plans/main/${{ github.sha }}/${{ github.run_id }}/${{ github.run_attempt }}/${{ steps.slug.outputs.slug }}/plan.txt
+          PLAN_URI: s3://woofle-pemc-tf-run/${{ steps.plan-key.outputs.plan_key }}/plan.txt
         run: |
           state_serial=$STATE_SERIAL
 
@@ -168,7 +192,14 @@ jobs:
           reviewed_file="$RUNNER_TEMP/reviewed-summary.json"
           diff_file="$RUNNER_TEMP/divergence.txt"
 
-          if ! aws s3 cp "$reviewed_uri" "$reviewed_file"; then
+          if ! out=$(aws s3 cp "$reviewed_uri" "$reviewed_file" 2>&1); then
+            # Only a missing key means "unverified". Anything else
+            # (e.g. 403, throttling, network) is an error, not a missing plan.
+            if ! echo "$out" | grep -qE '\(404\)|NoSuchKey|does not exist'; then
+              echo "::error::Could not read the reviewed summary."
+              echo "$out"
+              exit 1
+            fi
             echo "::warning::No reviewed plan found for ${STACK_SLUG} at ${reviewed_uri} - it is missing or expired. Review this plan before approving the apply."
             echo "status=unverified" >> "$GITHUB_OUTPUT"
             {
@@ -205,46 +236,32 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Compute plan digest and key
-        id: digest-key
+      - name: Compute plan digest
+        id: digest
         working-directory: ${{ inputs.stack }}
-        env:
-          STACK_SLUG: ${{ steps.slug.outputs.slug }}
-        run: |
-          key="plans/main/${GITHUB_SHA}/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/${STACK_SLUG}"
-          echo "plan_key=$key" >> "$GITHUB_OUTPUT"
-          echo "plan_digest=$(sha256sum tfplan | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        run: echo "plan_digest=$(sha256sum tfplan | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload plan artifacts to the Terraform run bucket
         working-directory: ${{ inputs.stack }}
         env:
-          KEY: ${{ steps.digest-key.outputs.plan_key }}
+          KEY: ${{ steps.plan-key.outputs.plan_key }}
         run: |
           for f in plan.txt tfplan summary.json metadata.json; do
             aws s3 cp "$f" "s3://woofle-pemc-tf-run/${KEY}/${f}" \
               --sse aws:kms --sse-kms-key-id alias/woofle-pemc-tf-run
           done
 
-      # Used to determine whether to ask someone for approval an apply
-      # in case it changes nothing.
-      - name: Determine whether the plan has changes
-        id: has-changes
+      # The plan.txt digest lets the approver verify the file
+      # they fetch from S3.
+      - name: Write plan comment to job summary
         working-directory: ${{ inputs.stack }}
-        run: |
-          has_changes=$(jq '[.counts[]] | add > 0' summary.json)
-          echo "has_changes=$has_changes" >> "$GITHUB_OUTPUT"
-
-      # The job summary is publicly visible, so it only points at the plan
-      # in S3 rather than containing it.
-      - name: Write plan location to job summary
         env:
-          KEY: ${{ steps.digest-key.outputs.plan_key }}
+          STACK_SLUG: ${{ steps.slug.outputs.slug }}
         run: |
+          cat "comment-${STACK_SLUG}.md" >> "$GITHUB_STEP_SUMMARY"
           {
-            echo "### Terraform plan"
             echo
-            echo "Full plan: \`s3://woofle-pemc-tf-run/${KEY}/plan.txt\`"
-            echo "\`aws s3 cp s3://woofle-pemc-tf-run/${KEY}/plan.txt - --profile management\`"
+            echo "plan.txt sha256: \`$(sha256sum plan.txt | cut -d' ' -f1)\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   apply:
@@ -382,6 +399,17 @@ jobs:
             --sse aws:kms --sse-kms-key-id alias/woofle-pemc-tf-run
           echo "::error::Terraform apply FAILED and the state could not be saved to the backend. The in-flight state was rescued to ${dest} - recover it with 'terraform state push'"
 
+      # The pemc-state profile re-reads the token file on every terraform
+      # command, and the OIDC token only lives ~300s. The apply may have
+      # outlived the token fetched earlier, so refresh the same file.
+      - name: Refresh GitHub OIDC token for the state backend
+        env:
+          TOKEN_FILE: ${{ steps.oidc-token.outputs.token-file }}
+        run: |
+          curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
+            | jq -r '.value' > "$TOKEN_FILE"
+
       - name: Check convergence
         id: converge
         working-directory: ${{ inputs.stack }}
@@ -428,6 +456,7 @@ jobs:
           aws-region: ap-south-1
 
       - name: Upload apply output
+        id: upload-apply-output
         if: always() && steps.apply-output.outputs.present == 'true'
         working-directory: ${{ inputs.stack }}
         env:
@@ -436,7 +465,10 @@ jobs:
           aws s3 cp apply.txt "s3://woofle-pemc-tf-run/${PLAN_KEY}/apply.txt" \
             --sse aws:kms --sse-kms-key-id alias/woofle-pemc-tf-run
 
+      # Runs even when apply failed, as long as the output was uploaded,
+      # so the summary still points at apply.txt.
       - name: Write apply result to job summary
+        if: always() && steps.upload-apply-output.outcome == 'success'
         env:
           CONVERGED: ${{ steps.converge.outputs.converged }}
           PLAN_KEY: ${{ needs.plan.outputs.plan_key }}
