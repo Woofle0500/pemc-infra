@@ -382,6 +382,17 @@ jobs:
             --sse aws:kms --sse-kms-key-id alias/woofle-pemc-tf-run
           echo "::error::Terraform apply FAILED and the state could not be saved to the backend. The in-flight state was rescued to ${dest} - recover it with 'terraform state push'"
 
+      # The pemc-state profile re-reads the token file on every terraform
+      # command, and the OIDC token only lives ~300s. The apply may have
+      # outlived the token fetched earlier, so refresh the same file.
+      - name: Refresh GitHub OIDC token for the state backend
+        env:
+          TOKEN_FILE: ${{ steps.oidc-token.outputs.token-file }}
+        run: |
+          curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
+            | jq -r '.value' > "$TOKEN_FILE"
+
       - name: Check convergence
         id: converge
         working-directory: ${{ inputs.stack }}
