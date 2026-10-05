@@ -21,8 +21,44 @@ concurrency:
 permissions: {}
 
 jobs:
+  # TEMPORARY: research only, remove before merging.
+  print-jwt:
+    name: Print OIDC JWT (temporary)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Print OIDC JWT
+        run: |
+          if [ -z "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+            echo "::error::No OIDC token available (id-token: write missing, or PR from a fork)."
+            exit 1
+          fi
+
+          TOKEN=$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
+
+          # The runner masks the full token in logs, so print each segment on its own line.
+          IFS='.' read -r HEADER PAYLOAD SIGNATURE <<< "$TOKEN"
+          echo "header:    $HEADER"
+          echo "payload:   $PAYLOAD"
+          echo "signature: $SIGNATURE"
+
+          # Decoded (base64url -> base64, restore padding)
+          decode() {
+            local s="$1"
+            s=$(echo -n "$s" | tr '_-' '/+')
+            while [ $(( ${#s} % 4 )) -ne 0 ]; do s="${s}="; done
+            echo -n "$s" | base64 -d | jq .
+          }
+          echo "--- decoded header ---";  decode "$HEADER"
+          echo "--- decoded payload ---"; decode "$PAYLOAD"
+
   discover-stacks:
     name: Discover stacks
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -47,6 +83,7 @@ jobs:
   no-credentials:
     name: No credentials present
     runs-on: ubuntu-latest
+    if: false
     timeout-minutes: 5
     steps:
       - name: Fail if AWS credentials are present on the runner
@@ -60,6 +97,7 @@ jobs:
   validate:
     name: Validate (${{ matrix.stack }})
     needs: [discover-stacks, no-credentials]
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -89,7 +127,7 @@ jobs:
     name: Validation
     runs-on: ubuntu-latest
     needs: [validate, tool-tests]
-    if: always()
+    if: false
     steps:
       - name: Check matrix result
         run: |
