@@ -161,11 +161,40 @@ jobs:
             --state-serial "$state_serial" \
             --plan-uri "$PLAN_URI"
 
-      # Real policy evaluation (OPA/Conftest) lands here later.
-      - name: Policy gate (placeholder)
+      # continue-on-error so the findings still reach the comment and the
+      # uploads still run. The last step of the job fails it instead.
+      - name: Set up policy gate
+        uses: ./.github/actions/policy-gate-setup
+
+      - name: Policy gate
+        id: policy-gate
+        continue-on-error: true
+        working-directory: ${{ inputs.stack }}
+        env:
+          STACK: ${{ inputs.stack }}
         run: |
-          echo "Policy gate: not yet implemented"
-          exit 0
+          rc=0
+          "$GITHUB_WORKSPACE/scripts/policy-gate.sh" "$STACK" plan.json || rc=$?
+          echo "exit-code=$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
+
+      # Appended to the comment file, which "Write plan comment to job
+      # summary" below copies into $GITHUB_STEP_SUMMARY.
+      - name: Add policy findings to the plan comment
+        working-directory: ${{ inputs.stack }}
+        env:
+          STACK_SLUG: ${{ steps.slug.outputs.slug }}
+        run: |
+          {
+            echo
+            echo "### Policy findings"
+            echo
+            if [ -f findings.md ]; then
+              cat findings.md
+            else
+              echo "Policy evaluation failed: the policy gate produced no result."
+            fi
+          } >> "comment-${STACK_SLUG}.md"
 
       # From here on we no longer need sandbox access - swap to the
       # management plan role for the S3 steps that follow (divergence
@@ -263,6 +292,14 @@ jobs:
             echo
             echo "plan.txt sha256: \`$(sha256sum plan.txt | cut -d' ' -f1)\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if the policy gate failed
+        if: steps.policy-gate.outputs.exit-code != '0'
+        env:
+          EXIT_CODE: ${{ steps.policy-gate.outputs.exit-code }}
+        run: |
+          echo "::error::Policy gate failed (exit code ${EXIT_CODE:-unknown}). See the policy findings in the plan summary."
+          exit 1
 
   apply:
     name: Apply

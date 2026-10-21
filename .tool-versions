@@ -2,3 +2,4 @@ terraform 1.15.9
 python 3.12.14
 trivy 0.74.0
 tflint 0.64.0
+conftest 0.71.1

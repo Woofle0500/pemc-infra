@@ -1,0 +1,48 @@
+name: Policy gate setup
+description: >-
+  Sets up Python and conftest and checks out the policy repo at the commit
+  pinned in .policy-version, into ./policy. Run after actions/checkout.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version-file: .tool-versions
+
+    # Keep in sync with .tool-versions and with pemc-policy, whose tests
+    # run on the same conftest (it bundles OPA 1.21.1).
+    - name: Install conftest
+      shell: bash
+      env:
+        CONFTEST_VERSION: 0.71.1
+        CONFTEST_SHA256: c3f6b2a753bd56e377a1e51a95ae3e057f926f2e9139f7d5b5dfbbaf810f7985
+      run: |
+        curl -sSfL -o "$RUNNER_TEMP/conftest.tar.gz" \
+          "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+        echo "${CONFTEST_SHA256}  $RUNNER_TEMP/conftest.tar.gz" | sha256sum -c -
+        tar -xzf "$RUNNER_TEMP/conftest.tar.gz" -C "$RUNNER_TEMP" conftest
+        sudo install "$RUNNER_TEMP/conftest" /usr/local/bin/conftest
+        conftest --version
+
+    - name: Read pinned policy version
+      id: policy-version
+      shell: bash
+      run: |
+        if [ ! -f .policy-version ]; then
+          echo "::error::.policy-version is missing. It must hold a full commit SHA of Woofle0500/pemc-policy."
+          exit 1
+        fi
+        sha=$(tr -d '[:space:]' < .policy-version)
+        if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "::error::.policy-version must hold a full 40-character commit SHA."
+          exit 1
+        fi
+        echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: Woofle0500/pemc-policy
+        ref: ${{ steps.policy-version.outputs.sha }}
+        path: policy
+        persist-credentials: false
