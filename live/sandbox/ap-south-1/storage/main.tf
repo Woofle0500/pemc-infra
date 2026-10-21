@@ -12,3 +12,9 @@ module "storage" {
   versioning_enabled = var.versioning_enabled
   kms_key_arn        = data.aws_kms_alias.storage.target_key_arn
 }
+
+resource "aws_ebs_volume" "this" {
+  availability_zone = "ap-south-1a"
+  size = 20
+  encrypted = false
+}
