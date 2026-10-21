@@ -28,9 +28,7 @@ if ! err=$(python3 "$policy_dir/normalizer/normalize.py" "$plan" --stack "$stack
   exit 2
 fi
 
-mkdir ./empty_dir
-
 exec python3 "$policy_dir/normalizer/evaluate.py" input.json \
-  --policies "./empty_dir" \
+  --policies "$policy_dir/policies" \
   --findings findings.json \
   --markdown findings.md
