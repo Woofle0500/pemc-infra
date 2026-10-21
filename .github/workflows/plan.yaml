@@ -299,12 +299,38 @@ jobs:
   plan-gate:
     name: Plan
     runs-on: ubuntu-latest
-    needs: plan
+    needs: [discover-stacks, plan]
     if: always()
     steps:
       - name: Check job results
         run: |
           if [ "${{ needs.plan.result }}" != "success" ]; then
             echo "One or more stacks failed to plan, or the least-privilege assertions failed"
+            exit 1
+          fi
+
+      # Each stack's plan job records the policy gate's exit code as an
+      # artifact and stays green, so the PR comment still gets posted.
+      - name: Download policy gate results
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: policy-gate-*
+          path: policy-gate
+          merge-multiple: true
+
+      # A stack with no result counts as failed, so a gate that never ran
+      # can't pass.
+      - name: Check policy gate results
+        env:
+          STACKS: ${{ needs.discover-stacks.outputs.stacks }}
+        run: |
+          failed=()
+          for stack in $(jq -r '.[]' <<<"$STACKS"); do
+            slug=$(echo "${stack#live/}" | tr '/' '-')
+            result=$(cat "policy-gate/policy-gate-${slug}.txt" 2>/dev/null || echo missing)
+            [ "$result" = "0" ] || failed+=("${stack} (${result})")
+          done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::Policy gate failed for: ${failed[*]}. See the plan comment on the PR for the findings."
             exit 1
           fi
