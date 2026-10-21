@@ -143,6 +143,11 @@ jobs:
       - name: Set up policy gate
         uses: ./.github/actions/policy-gate-setup
 
+      # TEMPORARY, floor test: leaves 2 policy packages, below MIN_POLICIES.
+      # Revert before merging.
+      - name: Remove a policy
+        run: rm policy/policies/aws/ebs/encryption_required.rego policy/policies/aws/ebs/encryption_required_test.rego
+
       - name: Policy gate
         id: policy-gate
         continue-on-error: true
