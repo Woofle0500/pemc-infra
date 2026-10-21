@@ -33,3 +33,4 @@ Each test was run manually on a PR, on 21-10-2026, and behaved as expected. Revi
 Proves these behaviours on the pipeline as it stood when tested. It does not prove:
 
 - **The main-branch plan job.** All five tests ran on PRs. The same gate script and setup action run there, but failing the plan job and skipping the apply was not exercised.
+- **Changes to the gate itself.** A PR can edit `policy-gate.sh`, the setup action, the workflows or `.policy-version`. On a PR GitHub runs the PR's own copy of the workflow, and after the merge it runs the merged copy, so a PR that removes the gate passes both the PR check and the main-branch check. Read the diff to catch it. Nothing in this repo can close that, which is why SCP in AWS exists.

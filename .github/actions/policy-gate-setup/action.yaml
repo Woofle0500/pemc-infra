@@ -46,3 +46,22 @@ runs:
         ref: ${{ steps.policy-version.outputs.sha }}
         path: policy
         persist-credentials: false
+        fetch-depth: 0 # full history, so origin/main exists for the check below
+
+    # The pin must be a commit that is on the policy repo's main, not one from
+    # an unreviewed branch.
+    - name: Check the pinned commit is on pemc-policy main
+      shell: bash
+      env:
+        SHA: ${{ steps.policy-version.outputs.sha }}
+      run: |
+        if ! git -C policy merge-base --is-ancestor "$SHA" origin/main; then
+          echo "::error::.policy-version $SHA is not on pemc-policy main."
+          exit 1
+        fi
+
+    # requirements.txt is the policy repo's runtime list. 
+    # Installed from the pinned checkout, after the check above, so only a reviewed commit's requirements are used.
+    - name: Install policy gate dependencies
+      shell: bash
+      run: pip install -r policy/requirements.txt
