@@ -137,7 +137,9 @@ jobs:
             --plan-uri "$PLAN_URI"
 
       # continue-on-error so the findings still reach the comment and the
-      # uploads still run. The last step of the job fails it instead.
+      # uploads still run. This job stays green on findings: the PR comment
+      # job refuses to post when any plan job fails. The "Plan" check in
+      # plan.yaml reads the result recorded below and fails the PR instead.
       - name: Set up policy gate
         uses: ./.github/actions/policy-gate-setup
 
@@ -168,6 +170,23 @@ jobs:
               echo "Policy evaluation failed: the policy gate produced no result."
             fi
           } >> "comment-${STACK_SLUG}.md"
+
+      # Handed to plan.yaml as an artifact: a matrix of reusable-workflow
+      # calls can't return per-stack outputs. Anything but "0" fails the PR.
+      - name: Record policy gate result
+        working-directory: ${{ inputs.stack }}
+        env:
+          EXIT_CODE: ${{ steps.policy-gate.outputs.exit-code }}
+          STACK_SLUG: ${{ steps.slug.outputs.slug }}
+        run: echo "${EXIT_CODE:-unknown}" > "policy-gate-${STACK_SLUG}.txt"
+
+      - name: Upload policy gate result
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: policy-gate-${{ steps.slug.outputs.slug }}
+          path: ${{ inputs.stack }}/policy-gate-${{ steps.slug.outputs.slug }}.txt
+          retention-days: 1
+          overwrite: true
 
       # From here on we no longer need sandbox access - swap to the
       # management plan role to upload the run's artifacts.
@@ -212,11 +231,3 @@ jobs:
           path: ${{ inputs.stack }}/comment-${{ steps.slug.outputs.slug }}.md
           retention-days: 1
           overwrite: true
-
-      - name: Fail if the policy gate failed
-        if: steps.policy-gate.outputs.exit-code != '0'
-        env:
-          EXIT_CODE: ${{ steps.policy-gate.outputs.exit-code }}
-        run: |
-          echo "::error::Policy gate failed (exit code ${EXIT_CODE:-unknown}). See the policy findings in the plan summary."
-          exit 1

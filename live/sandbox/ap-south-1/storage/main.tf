@@ -15,6 +15,6 @@ module "storage" {
 
 resource "aws_ebs_volume" "this" {
   availability_zone = "ap-south-1a"
-  size = 20
-  encrypted = false
+  size              = 20
+  encrypted         = false
 }
