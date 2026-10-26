@@ -3,6 +3,11 @@ description: >-
   Sets up Python and conftest and checks out the policy repo at the commit
   pinned in .policy-version, into ./policy. Run after actions/checkout.
 
+outputs:
+  policy-tag:
+    description: The release tag (vX.Y.Z) on the pinned policy commit.
+    value: ${{ steps.policy-tag.outputs.tag }}
+
 runs:
   using: composite
   steps:
@@ -46,7 +51,7 @@ runs:
         ref: ${{ steps.policy-version.outputs.sha }}
         path: policy
         persist-credentials: false
-        fetch-depth: 0 # full history, so origin/main exists for the check below
+        fetch-depth: 0 # full history, so origin/main and the tags exist for the checks below
 
     # The pin must be a commit that is on the policy repo's main, not one from
     # an unreviewed branch.
@@ -60,8 +65,23 @@ runs:
           exit 1
         fi
 
+    # The pin must be a release, so a commit that was never tagged vX.Y.Z is refused. If the commit has several release tags, the highest is reported.
+    - name: Check the pinned commit is a release
+      id: policy-tag
+      shell: bash
+      env:
+        SHA: ${{ steps.policy-version.outputs.sha }}
+      run: |
+        tag=$(git -C policy tag --points-at "$SHA" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)
+        if [ -z "$tag" ]; then
+          echo "::error::.policy-version $SHA has no release tag (vX.Y.Z) on pemc-policy. Pin a released commit."
+          exit 1
+        fi
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+        echo "policies: $tag ($SHA)" >> "$GITHUB_STEP_SUMMARY"
+
     # requirements.txt is the policy repo's runtime list. 
-    # Installed from the pinned checkout, after the check above, so only a reviewed commit's requirements are used.
+    # Installed from the pinned checkout, after the checks above.
     - name: Install policy gate dependencies
       shell: bash
       run: pip install -r policy/requirements.txt
