@@ -164,6 +164,7 @@ jobs:
       # continue-on-error so the findings still reach the comment and the
       # uploads still run. The last step of the job fails it instead.
       - name: Set up policy gate
+        id: policy-setup
         uses: ./.github/actions/policy-gate-setup
 
       - name: Policy gate
@@ -184,10 +185,13 @@ jobs:
         working-directory: ${{ inputs.stack }}
         env:
           STACK_SLUG: ${{ steps.slug.outputs.slug }}
+          POLICY_TAG: ${{ steps.policy-setup.outputs.policy-tag }}
         run: |
           {
             echo
             echo "### Policy findings"
+            echo
+            echo "policies: ${POLICY_TAG:-unknown}"
             echo
             if [ -f findings.md ]; then
               cat findings.md

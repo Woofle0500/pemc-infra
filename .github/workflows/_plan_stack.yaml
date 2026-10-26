@@ -141,6 +141,7 @@ jobs:
       # job refuses to post when any plan job fails. The "Plan" check in
       # plan.yaml reads the result recorded below and fails the PR instead.
       - name: Set up policy gate
+        id: policy-setup
         uses: ./.github/actions/policy-gate-setup
 
       - name: Policy gate
@@ -159,10 +160,13 @@ jobs:
         working-directory: ${{ inputs.stack }}
         env:
           STACK_SLUG: ${{ steps.slug.outputs.slug }}
+          POLICY_TAG: ${{ steps.policy-setup.outputs.policy-tag }}
         run: |
           {
             echo
             echo "### Policy findings"
+            echo
+            echo "policies: ${POLICY_TAG:-unknown}"
             echo
             if [ -f findings.md ]; then
               cat findings.md
