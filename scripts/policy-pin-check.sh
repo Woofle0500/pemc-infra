@@ -22,7 +22,8 @@ if [ -z "$latest" ]; then
 fi
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+body=$(mktemp)
+trap 'rm -rf "$work" "$body"' EXIT
 git clone --quiet --no-checkout --filter=blob:none "$policy_url" "$work"
 
 pinned=$(git -C "$work" tag --points-at "$sha" \
@@ -58,14 +59,14 @@ for part in re.split(r"(?m)^(?=## )", sys.stdin.read()):
         print(part.rstrip() + "\n")
 ' "$pinned" "$latest" || true)
 
-body=$(mktemp)
+latest_sha=$(git -C "$work" rev-parse "$latest^{commit}")
+
 {
   echo "\`.policy-version\` pins pemc-policy $pinned (\`$sha\`). The latest release is $latest."
   echo
   echo "To update, set \`.policy-version\` to the full SHA of the new release:"
   echo
-  # ^{} is git syntax for "dereference this tag to the commit it points at".
-  echo "    git ls-remote $policy_url refs/tags/$latest^{}"
+  echo "    $latest_sha"
   echo
   echo "## Changes since $pinned"
   echo
