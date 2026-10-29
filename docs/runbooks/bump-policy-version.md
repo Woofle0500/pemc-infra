@@ -8,7 +8,7 @@
 2. **Get the commit SHA** of the new tag (not the tag object's SHA):
 
    ```bash
-   git ls-remote https://github.com/Woofle0500/pemc-policy.git 'refs/tags/vX.Y.Z^{}'
+   git ls-remote https://github.com/Woofle0500/pemc-policy.git 'refs/tags/vX.Y.Z' 'refs/tags/vX.Y.Z^{}' | tail -n 1
    ```
 
 3. **Open a PR that changes only `.policy-version`**, to that full SHA. The gate refuses a SHA that isn't on pemc-policy main or has no `vX.Y.Z` tag.
